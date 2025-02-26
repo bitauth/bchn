@@ -362,7 +362,7 @@ token::OutputData DecodeTokenDataUV(const UniValue &obj) {
         if ((val = o_nft.locate("commitment"))) { // optional, defaults to "empty"
             std::vector<uint8_t> vec;
             if (!(IsHex(val->get_str()) || val->get_str().empty())
-                    || (vec = ParseHex(val->get_str())).size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH) {
+                    || (vec = ParseHex(val->get_str())).size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12) {
                 throw std::runtime_error("Invalid \"commitment\" in tokenData");
             }
             comm.assign(vec.begin(), vec.end());

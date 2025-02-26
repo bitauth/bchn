@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 The Bitcoin developers
+// Copyright (c) 2022-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -49,20 +49,20 @@ struct Upgrade9OverrideTestingSetup : LibauthTestingSetup {
 
 /// Test fixture that can force-enable or disable upgrade 11 (vmlimits + bigint) as well as upgrade9 (cashtokens)
 struct Upgrade11OverrideTestingSetup : Upgrade9OverrideTestingSetup {
-    std::optional<std::string> optOrigArg;
+    std::optional<std::string> optOrigArg11;
     bool touchedUpgrade11 = false;
 
     Upgrade11OverrideTestingSetup() {
         if (gArgs.IsArgSet("-upgrade11activationtime")) {
-            optOrigArg = gArgs.GetArg("-upgrade11activationtime", "");
+            optOrigArg11 = gArgs.GetArg("-upgrade11activationtime", "");
         }
     }
 
     ~Upgrade11OverrideTestingSetup() override {
         if (touchedUpgrade11) {
             gArgs.ClearArg("-upgrade11activationtime");
-            if (optOrigArg) {
-                gArgs.ForceSetArg("-upgrade11activationtime", *optOrigArg);
+            if (optOrigArg11) {
+                gArgs.ForceSetArg("-upgrade11activationtime", *optOrigArg11);
             }
         }
     }
@@ -78,6 +78,37 @@ struct Upgrade11OverrideTestingSetup : Upgrade9OverrideTestingSetup {
     }
 };
 
+/// Test fixture that can force-enable or disable upgrade 12 (may2026), as well as upgrade 9 & 11
+struct Upgrade12OverrideTestingSetup : Upgrade11OverrideTestingSetup {
+    std::optional<std::string> optOrigArg12;
+    bool touchedUpgrade12 = false;
+
+    Upgrade12OverrideTestingSetup() {
+        if (gArgs.IsArgSet("-upgrade12activationtime")) {
+            optOrigArg12 = gArgs.GetArg("-upgrade12activationtime", "");
+        }
+    }
+
+    ~Upgrade12OverrideTestingSetup() override {
+        if (touchedUpgrade12) {
+            gArgs.ClearArg("-upgrade12activationtime");
+            if (optOrigArg12) {
+                gArgs.ForceSetArg("-upgrade12activationtime", *optOrigArg12);
+            }
+        }
+    }
+
+           /// Activates or deactivates upgrade 11 by setting the activation time in the past or future respectively
+    void SetUpgrade12Active(bool active) {
+        if (active) {
+            gArgs.ForceSetArg("-upgrade12activationtime", "1000000");
+        } else {
+            gArgs.ForceSetArg("-upgrade12activationtime", "9223372036854775807");
+        }
+        touchedUpgrade12 = true;
+    }
+};
+
 bool ran2022 = false, ran2023 = false, ran2025 = false;
 
 } // namespace
@@ -85,21 +116,24 @@ bool ran2022 = false, ran2023 = false, ran2025 = false;
 
 BOOST_AUTO_TEST_SUITE(libauth_tests)
 
-BOOST_FIXTURE_TEST_CASE(regression_2022, Upgrade11OverrideTestingSetup) {
+BOOST_FIXTURE_TEST_CASE(regression_2022, Upgrade12OverrideTestingSetup) {
     SetUpgrade9Active(false); // needs to be forced off for this series of tests
     SetUpgrade11Active(false); // also need to ensure upgrade11 is not activated for this series of tests
+    SetUpgrade12Active(false); // also need to ensure upgrade12 is not activated for this series of tests
     RunTestPack("2022");
     ran2022 = true;
 }
 
-BOOST_FIXTURE_TEST_CASE(regression_2023, Upgrade11OverrideTestingSetup) {
+BOOST_FIXTURE_TEST_CASE(regression_2023, Upgrade12OverrideTestingSetup) {
     SetUpgrade11Active(false); // need to ensure upgrade11 is not activated for this series of tests
+    SetUpgrade12Active(false); // need to ensure upgrade12 is not activated for this series of tests
     RunTestPack("2023");
     ran2023 = true;
 }
 
-BOOST_FIXTURE_TEST_CASE(upgrade11_2025, Upgrade11OverrideTestingSetup) {
+BOOST_FIXTURE_TEST_CASE(upgrade11_2025, Upgrade12OverrideTestingSetup) {
     SetUpgrade11Active(true); // force Upgrade11 (vmlimts + bigint) to be active
+    SetUpgrade12Active(false); // need to ensure upgrade12 is not activated for this series of tests
     RunTestPack("2025");
     ran2025 = true;
 }
