@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -40,6 +40,7 @@ static std::map<std::string, uint32_t> mapFlagNames = {
     {"P2SH_32", SCRIPT_ENABLE_P2SH_32},
     {"ENABLE_MAY2025", SCRIPT_ENABLE_MAY2025},
     {"VM_LIMITS_STANDARD", SCRIPT_VM_LIMITS_STANDARD},
+    {"ENABLE_MAY2026", SCRIPT_ENABLE_MAY2026},
 };
 
 uint32_t ParseScriptFlags(const std::string &strFlags) {
