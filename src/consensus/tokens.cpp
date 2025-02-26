@@ -1,4 +1,4 @@
-// Copyright (c) 2022 The Bitcoin developers
+// Copyright (c) 2022-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,7 +22,7 @@ namespace {
 template <typename K, typename V> using Map = std::map<K, V>;
 template <typename K> using Set = std::set<K>;
 
-bool CheckTokenData(const token::OutputDataPtr &pdata, CValidationState &state) {
+bool CheckTokenData(const uint32_t scriptFlags, const token::OutputDataPtr &pdata, CValidationState &state) {
     if (!pdata) return true;
     if ( ! pdata->IsValidBitfield()) {
         // token has disallowed bitfield byte -- this should have been caught by unserialize but check left in
@@ -69,7 +69,10 @@ bool CheckTokenData(const token::OutputDataPtr &pdata, CValidationState &state) 
         }
         return true; // since this is a pure FT, the below check is not done (they are only for NFT)
     }
-    if (commitment.size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH) {
+    const size_t maxCommitmentLenth = scriptFlags & SCRIPT_ENABLE_MAY2026
+                                          ? token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12
+                                          : token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9;
+    if (commitment.size() > maxCommitmentLenth) {
         // token has oversized commitment
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-token-commitment-oversized", false,
                          strprintf("%s: token %s has nft commitment that is oversized %d",
@@ -177,7 +180,7 @@ bool CheckTxTokens(const CTransaction &tx, CValidationState &state, const CCoins
 
             if (pdata) {
                 // tally input tokens seen
-                if ( ! CheckTokenData(pdata, state)) { //! check basic consensus sanity
+                if ( ! CheckTokenData(scriptFlags, pdata, state)) { //! check basic consensus sanity
                     return false; // state set by CheckTokenData
                 }
 
@@ -211,7 +214,7 @@ bool CheckTxTokens(const CTransaction &tx, CValidationState &state, const CCoins
             const auto &pdata = out.tokenDataPtr;
             if (!pdata) continue;
             // Check token consensus sanity (amount + everything else)
-            if ( ! CheckTokenData(pdata, state)) {
+            if ( ! CheckTokenData(scriptFlags, pdata, state)) {
                 return false; // state set by CheckTokenData
             }
             const auto &id = pdata->GetId();

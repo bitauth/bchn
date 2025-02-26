@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 The Bitcoin developers
+// Copyright (c) 2022-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -26,6 +26,7 @@
 #include <streams.h>
 #include <tinyformat.h>
 #include <uint256.h>
+#include <util/check.h>
 #include <util/defer.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -807,8 +808,10 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
                                        nUtxoHeight, false), false);
         return CTransaction{tx};
     }();
-    const auto MakeOversizedCommitmentTx = [&coins](const uint64_t commitmentLen) {
-        BOOST_CHECK_GT(commitmentLen, token::MAX_CONSENSUS_COMMITMENT_LENGTH);
+    const auto MakeOversizedCommitmentTx = [&coins](const uint64_t commitmentLen, bool upgrade12 = false) {
+        const size_t commitmentLimit = upgrade12 ? token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12
+                                                 : token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9;
+        BOOST_CHECK_GT(commitmentLen, commitmentLimit);
         CMutableTransaction tx;
         const auto randhash = InsecureRand256();
         const std::vector<uint8_t> randvec{randhash.begin(), randhash.end()};
@@ -854,8 +857,11 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
         return CTransaction{tx};
     };
     const CTransaction outOfConsensusCommitmentTokenDataTx = MakeOversizedCommitmentTx(
-                                                                 token::MAX_CONSENSUS_COMMITMENT_LENGTH + 1);
-    const CTransaction outOfConsensusCommitmentTokenDataTx2 = MakeOversizedCommitmentTx(MAX_SCRIPT_ELEMENT_SIZE_LEGACY * 2);
+        token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9 + 1);
+    const CTransaction outOfConsensusCommitmentTokenDataTx_upgrade12 = MakeOversizedCommitmentTx(
+        token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12 + 1, true);
+    const CTransaction outOfConsensusCommitmentTokenDataTx2 = MakeOversizedCommitmentTx(
+        MAX_SCRIPT_ELEMENT_SIZE_LEGACY * 2, true);
     const CTransaction badTokenOutputDataTx = [&coins]{
         CMutableTransaction tx;
         const auto randhash = InsecureRand256();
@@ -939,6 +945,9 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
     BOOST_CHECK(! CheckTxTokens(outOfConsensusCommitmentTokenDataTx2, state, coins, flags, nUtxoHeight + 1));
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-vin-tokenprefix-preactivation");
     state = CValidationState{};
+    BOOST_CHECK(! CheckTxTokens(outOfConsensusCommitmentTokenDataTx_upgrade12, state, coins, flags, nUtxoHeight + 1));
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-vin-tokenprefix-preactivation");
+    state = CValidationState{};
     BOOST_CHECK_MESSAGE(CheckTxTokens(badTokenOutputDataTx, state, coins, flags, nUtxoHeight + 1),
                         "Before activation, the badTokenOutputDataTx should pass validation");
     state = CValidationState{};
@@ -955,6 +964,7 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
     BOOST_CHECK(   AreInputsStandard(badTokenMintTx, coins, flags));
     BOOST_CHECK( ! AreInputsStandard(outOfConsensusCommitmentTokenDataTx, coins, flags));
     BOOST_CHECK( ! AreInputsStandard(outOfConsensusCommitmentTokenDataTx2, coins, flags));
+    BOOST_CHECK( ! AreInputsStandard(outOfConsensusCommitmentTokenDataTx_upgrade12, coins, flags));
     BOOST_CHECK(   AreInputsStandard(badTokenOutputDataTx, coins, flags));
     BOOST_CHECK( ! AreInputsStandard(badTokenInputDataTx, coins, flags));
     // Check IsStandardTx
@@ -971,6 +981,8 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
     BOOST_CHECK( ! IsStandardTx(outOfConsensusCommitmentTokenDataTx, reason, flags)); // pre-activation: token txouts are non-standard
     BOOST_CHECK_EQUAL(reason, "txn-tokens-before-activation");
     BOOST_CHECK( ! IsStandardTx(outOfConsensusCommitmentTokenDataTx2, reason, flags)); // pre-activation: token txouts are non-standard
+    BOOST_CHECK_EQUAL(reason, "txn-tokens-before-activation");
+    BOOST_CHECK( ! IsStandardTx(outOfConsensusCommitmentTokenDataTx_upgrade12, reason, flags)); // pre-activation: token txouts are non-standard
     BOOST_CHECK_EQUAL(reason, "txn-tokens-before-activation");
     BOOST_CHECK( ! IsStandardTx(badTokenOutputDataTx, reason, flags));
     BOOST_CHECK_EQUAL(reason, "scriptpubkey");
@@ -994,11 +1006,27 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
                         "After activation, out-of-consensus minting of tokens forbidden");
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-invalid-category");
     state = CValidationState{};
+
+    // Pre-upgrade 12, commitments over 40 bytes are oversized and rejected
     BOOST_CHECK( ! CheckTxTokens(outOfConsensusCommitmentTokenDataTx, state, coins, flags, nUtxoHeight - 1));
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
     state = CValidationState{};
     BOOST_CHECK( ! CheckTxTokens(outOfConsensusCommitmentTokenDataTx2, state, coins, flags, nUtxoHeight - 1));
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+    state = CValidationState{};
+    BOOST_CHECK( ! CheckTxTokens(outOfConsensusCommitmentTokenDataTx_upgrade12, state, coins, flags, nUtxoHeight - 1));
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+
+    // Post-upgrade 12 enabled, the 41-byte commitment is accepted, the others >128 are still rejected
+    BOOST_CHECK(CheckTxTokens(outOfConsensusCommitmentTokenDataTx, state, coins, flags | SCRIPT_ENABLE_MAY2026, nUtxoHeight - 1));
+    state = CValidationState{};
+    BOOST_CHECK( ! CheckTxTokens(outOfConsensusCommitmentTokenDataTx2, state, coins, flags | SCRIPT_ENABLE_MAY2026, nUtxoHeight - 1));
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+    state = CValidationState{};
+    BOOST_CHECK( ! CheckTxTokens(outOfConsensusCommitmentTokenDataTx_upgrade12, state, coins, flags | SCRIPT_ENABLE_MAY2026, nUtxoHeight - 1));
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+
+    // Bad token data
     state = CValidationState{};
     BOOST_CHECK_MESSAGE( ! CheckTxTokens(badTokenOutputDataTx, state, coins, flags, nUtxoHeight - 1),
                         "After activation, the badTokenOutputDataTx should fail validation");
@@ -1017,6 +1045,7 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
     BOOST_CHECK(   AreInputsStandard(badTokenMintTx, coins, flags));
     BOOST_CHECK(   AreInputsStandard(outOfConsensusCommitmentTokenDataTx, coins, flags));
     BOOST_CHECK(   AreInputsStandard(outOfConsensusCommitmentTokenDataTx2, coins, flags));
+    BOOST_CHECK(   AreInputsStandard(outOfConsensusCommitmentTokenDataTx_upgrade12, coins, flags));
     BOOST_CHECK(   AreInputsStandard(badTokenOutputDataTx, coins, flags));
     BOOST_CHECK( ! AreInputsStandard(badTokenInputDataTx, coins, flags));
     // Check IsStandardTx
@@ -1027,6 +1056,7 @@ BOOST_AUTO_TEST_CASE(check_consensus_misc_activation) {
     BOOST_CHECK(   IsStandardTx(badTokenMintTx, reason, flags)); // post-activation: token txouts are standard
     BOOST_CHECK(   IsStandardTx(outOfConsensusCommitmentTokenDataTx, reason, flags)); // post-activation: token txouts with commitment >40 is "standard" (but still fails consensus later in pipeline)
     BOOST_CHECK(   IsStandardTx(outOfConsensusCommitmentTokenDataTx2, reason, flags)); // post-activation: token txouts with commitment >40 is "standard" (but still fails consensus later in pipeline)
+    BOOST_CHECK(   IsStandardTx(outOfConsensusCommitmentTokenDataTx_upgrade12, reason, flags)); // post-activation: token txouts with commitment >128 is "standard" (but still fails consensus later in pipeline)
     BOOST_CHECK( ! IsStandardTx(badTokenOutputDataTx, reason, flags));
     BOOST_CHECK_EQUAL(reason, "scriptpubkey");
     BOOST_CHECK( ! IsStandardTx(badTokenInputDataTx, reason, flags));
@@ -1091,13 +1121,38 @@ static Defer<std::function<void()>> SetUpgrade9Active(bool active) {
     const auto prevVal = g_Upgrade9HeightOverride;
     const auto currentHeight = []{
         LOCK(cs_main);
-        return ::ChainActive().Tip()->nHeight;
+        return CHECK_NONFATAL(::ChainActive().Tip())->nHeight;
     }();
     const auto activationHeight = active ? currentHeight - 1 : currentHeight + 1;
     g_Upgrade9HeightOverride = activationHeight;
     return Defer(std::function<void()>{
         [prevVal] {
             g_Upgrade9HeightOverride = prevVal;
+        }
+    });
+}
+
+/// Activates or deactivates upgrade 12 by setting the activation time via the gArgs mechanism to past or future
+[[nodiscard]]
+static Defer<std::function<void()>> SetUpgrade12Active(bool active) {
+    constexpr auto argName = "-upgrade12activationtime";
+    std::optional<int64_t> prevVal;
+    if (gArgs.IsArgSet(argName)) {
+        prevVal = gArgs.GetArg(argName, ::GetConfig().GetChainParams().GetConsensus().upgrade12ActivationTime);
+    }
+    const int64_t currentMTP = []{
+        LOCK(cs_main);
+        return CHECK_NONFATAL(::ChainActive().Tip())->GetMedianTimePast();
+    }();
+    const auto activationTime = active ? currentMTP - 1 : currentMTP + 1;
+    gArgs.ForceSetArg(argName, strprintf("%i", activationTime));
+    return Defer(std::function<void()>{
+        [prevVal] {
+            if (prevVal) {
+                gArgs.ForceSetArg(argName, strprintf("%i", *prevVal));
+            } else {
+                gArgs.ClearArg(argName);
+            }
         }
     });
 }
@@ -1599,20 +1654,53 @@ BOOST_FIXTURE_TEST_CASE(with_mempool_check_invalid_ft_with_commitment, TestChain
 
 /// bad-txns-token-commitment-oversized: Check that tokens with oversized commitments cannot be mined
 BOOST_FIXTURE_TEST_CASE(with_mempool_check_oversized_token_commitment, TestChain100Setup) {
-    std::vector<CTxOut> vout(1);
+    std::vector<CTxOut> vout(1), vout2(1);
+    BOOST_REQUIRE_GE(m_coinbase_txns.size(), 2);
+    BOOST_REQUIRE_GT(token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12, token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9);
     vout[0].tokenDataPtr.emplace( token::Id{m_coinbase_txns[0]->GetId()},
                                   token::SafeAmount::fromInt(1).value(),
-                                  token::NFTCommitment{token::MAX_CONSENSUS_COMMITMENT_LENGTH + 1,
+                                  token::NFTCommitment{token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12,
                                                        uint8_t(0xaa)},
                                   true /* hasNFT */, false /* isMutableNFT */,
                                   true /* isMintingNFT */, false /* uncheckedNFT */ );
-    auto a1 = SetUpgrade9Active(true);
-    CMutableTransaction tx1 = CreateAndSignTx(coinbaseKey, m_coinbase_txns[0], vout);
+    vout2[0].tokenDataPtr.emplace( token::Id{m_coinbase_txns[1]->GetId()},
+                                   token::SafeAmount::fromInt(1).value(),
+                                   token::NFTCommitment{token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12 + 1,
+                                                        uint8_t(0xab)},
+                                   true /* hasNFT */, false /* isMutableNFT */,
+                                   true /* isMintingNFT */, false /* uncheckedNFT */ );
+    auto u9_on = SetUpgrade9Active(true);
+    auto u12_off = SetUpgrade12Active(false);
+    CMutableTransaction tx_oversized_upgrade9_only = CreateAndSignTx(coinbaseKey, m_coinbase_txns[0], vout);
+    CreateAndProcessBlock({}, {}); // Ensures we can spend m_coinbase_txs[1]
+    CMutableTransaction tx_always_oversized = CreateAndSignTx(coinbaseKey, m_coinbase_txns[1], vout2);
 
-    // Attempt to mine the transaction
+    // Attempt to mine the transaction, using upgrade 9 rules only, no upgrade 12.
     CValidationState state;
-    BOOST_CHECK_MESSAGE( ! MineTransactions({tx1}, state),
-                        "Tokens with an oversized commitment may not be mined into a block");
+    BOOST_CHECK_MESSAGE( ! MineTransactions({tx_oversized_upgrade9_only}, state),
+                        "Pre-upgrade 12: Tokens with an oversized commitment >40 bytes may not be mined into a block");
+    BOOST_CHECK(! state.IsValid());
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+    // Try the same with the "commitment is always too big" tx.
+    state = {};
+    BOOST_CHECK_MESSAGE( ! MineTransactions({tx_always_oversized}, state),
+                        "Tokens with an oversized commitment >128 bytes may not be mined into a block");
+    BOOST_CHECK(! state.IsValid());
+    BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
+
+    // Now, turn on upgrade 12, and the 128 byte commitment should mine ok
+    state = {};
+    auto u12_on = SetUpgrade12Active(true);
+    BOOST_REQUIRE_MESSAGE(MineTransactions({tx_oversized_upgrade9_only}, state),
+                          "Post-upgrade 12: Tokens with a commitment >40 but <=128 bytes may be mined into a block");
+    BOOST_CHECK(state.IsValid());
+    // Consume the coin we just spent so as to not confuse other tests in this file.
+    m_coinbase_txns.erase(m_coinbase_txns.begin());
+
+    // Attempt to mine a commitment that is too large for both upgrade 9 and upgrade 12
+    state = {};
+    BOOST_CHECK_MESSAGE( ! MineTransactions({tx_always_oversized}, state),
+                        "Tokens with an oversized commitment >128 bytes may not be mined into a block");
     BOOST_CHECK(! state.IsValid());
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-token-commitment-oversized");
 }
@@ -1713,9 +1801,12 @@ BOOST_AUTO_TEST_CASE(check_tx_tokens_esoteric_failure_modes) {
         int64_t activationHeight;
     };
 
-    auto MakeValidContext = [&](bool has_nft = true) {
+    auto MakeValidContext = [&](bool has_nft = true, bool upgrade12 = false) {
         TxTokensValidationContext ret{std::make_unique<CCoinsViewCache>(&dummy),
                                       {}, {}, STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_TOKENS, 0};
+        if (upgrade12) {
+            ret.scriptFlags |= SCRIPT_ENABLE_MAY2026;
+        }
         auto & coins = ret.coins;
         auto & tx = ret.tx;
         tx.vin.resize(2);
@@ -1851,11 +1942,15 @@ BOOST_AUTO_TEST_CASE(check_tx_tokens_esoteric_failure_modes) {
         BOOST_CHECK_EQUAL(ctx.state.GetRejectReason(), "bad-txns-token-commitment-bitfield-mismatch");
     }
 
-    // Check that commitment cannot exceed 40 bytes: "bad-txns-token-commitment-oversized"
-    {
+    // Check that commitment cannot exceed the max consensus length: "bad-txns-token-commitment-oversized"
+    //   - upgrade9: 40 bytes is the limit
+    //   - after upgrade12: 128 bytes is the limit
+    for (const bool upgrade12 : {false, true}) {
         token::NFTCommitment big_commitment;
-        big_commitment.resize(token::MAX_CONSENSUS_COMMITMENT_LENGTH + 1, 0xcc);
-        auto ctx = MakeValidContext();
+        const size_t maxCommitment = upgrade12 ? token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12
+                                               : token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9;
+        big_commitment.resize(maxCommitment + 1u, 0xcc);
+        auto ctx = MakeValidContext(true /* has_nft */, upgrade12);
         // Force an invalid bitfield in one of the input coins
         Coin modifiedCoin = ctx.coins->AccessCoin(ctx.tx.vin[0].prevout);
         modifiedCoin.GetTxOut().tokenDataPtr->SetCommitment(big_commitment);
@@ -1866,7 +1961,7 @@ BOOST_AUTO_TEST_CASE(check_tx_tokens_esoteric_failure_modes) {
         // Force a zero amount in one of the output coins (requires a less-than-ideal const_cast to achieve due
         // to implementation details about how CTransaction is constructed and the serialize code not allowing us to
         // calculate a hash for invalid token data)
-        ctx = MakeValidContext();
+        ctx = MakeValidContext(true /* has_nft */, upgrade12);
         CTransaction tx{ctx.tx};
         const_cast<token::OutputData &>(*tx.vout[0].tokenDataPtr).SetCommitment(big_commitment);
         BOOST_CHECK(!CheckTxTokens(tx, ctx.state, *ctx.coins, ctx.scriptFlags, ctx.activationHeight));

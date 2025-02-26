@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Bitcoin developers
+// Copyright (c) 2018-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -370,17 +370,32 @@ BOOST_AUTO_TEST_CASE(test_DecodeTokenDataUV_TokenDataToUniv) {
         BOOST_CHECK_THROW(tok = DecodeTokenDataUV(uvAlt), std::runtime_error);
     }
 
-    // next, test commitment parsing where the "commitment" is too long
+    // next, test commitment parsing where the "commitment" is too long -- we limit it to the max for upgrade12 (128)
     {
         auto commitmentCopy = commitment;
         commitmentCopy.insert(commitmentCopy.end(), commitment.begin(), commitment.end());
-        BOOST_REQUIRE(commitmentCopy.size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH);
+        // First, test that parsing >40 but <= 128 is ok
+        BOOST_REQUIRE(commitmentCopy.size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9);
+        BOOST_REQUIRE(commitmentCopy.size() <= token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12);
 
-        const std::string json = MakeJsonString(category.ToString(), "\"1\"", HexStr(commitmentCopy));
+        std::string json = MakeJsonString(category.ToString(), "\"1\"", HexStr(commitmentCopy));
 
         UniValue uvAlt;
         BOOST_REQUIRE(uvAlt.read(json));
         token::OutputData tok;
+        BOOST_CHECK_NO_THROW(tok = DecodeTokenDataUV(uvAlt));
+
+        // Next, ensure that == 128 is ok
+        std::vector<uint8_t> commitment2(token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12, static_cast<uint8_t>(0xfe));
+        json = MakeJsonString(category.ToString(), "\"1\"", HexStr(commitment2));
+        BOOST_REQUIRE(uvAlt.read(json));
+        BOOST_CHECK_NO_THROW(tok = DecodeTokenDataUV(uvAlt));
+
+        // Finally, 129 or above should throw
+        commitment2.push_back(static_cast<uint8_t>(0xba));
+        BOOST_REQUIRE(commitment2.size() > token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12);
+        json = MakeJsonString(category.ToString(), "\"1\"", HexStr(commitment2));
+        BOOST_REQUIRE(uvAlt.read(json));
         BOOST_CHECK_THROW(tok = DecodeTokenDataUV(uvAlt), std::runtime_error);
     }
 
