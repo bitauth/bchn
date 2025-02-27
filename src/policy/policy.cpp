@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2023 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,7 @@
 #include <policy/policy.h>
 
 #include <script/interpreter.h>
+#include <script/vm_limits.h>
 #include <tinyformat.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -78,8 +79,15 @@ bool IsStandardTx(const CTransaction &tx, std::string &reason, uint32_t flags) {
         return false;
     }
 
+    // Pre-upgrade 12, we always had the standardness rule that scriptSigs could not exceed 1,650 bytes.
+    // Post-upgrade 12, we relax this limit to the maximum script size (10,000 bytes).
+    const size_t maxScriptSigSize = !(flags & SCRIPT_ENABLE_MAY2026) ? MAX_TX_IN_SCRIPT_SIG_SIZE_LEGACY
+                                                                     : MAX_SCRIPT_SIZE;
+
     for (const CTxIn &txin : tx.vin) {
-        if (txin.scriptSig.size() > MAX_TX_IN_SCRIPT_SIG_SIZE) {
+        if (txin.scriptSig.size() > maxScriptSigSize) {
+            // Note: after upgrade 12 is activated and checkpointed, this standardness check can be eliminated entirely
+            // since the script interpreter itself enforces a 10KB limit on scriptSig (interpreter.cpp; EvalScriptImpl).
             reason = "scriptsig-size";
             return false;
         }
