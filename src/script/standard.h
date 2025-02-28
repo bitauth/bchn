@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2022 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -61,15 +61,26 @@ static constexpr uint32_t MAX_OP_RETURN_RELAY = 223;
  */
 extern uint32_t nMaxDatacarrierBytes;
 
+/**
+ * Post-upgrade-12 only. The maximum length of a standard tx "bare script" aka "p2s". In other words, after upgrade 12
+ * activates, any scriptPubKey that doesn't match p2pk, p2pkh, p2sh[32], bare multisig, and/or OP_RETURN, and is less
+ * than or equal to this length is considerd "standard" and is categorized as "p2s".
+ *
+ * Before upgrade12, such scripts were categorized as non-standard.
+ */
+static constexpr size_t MAX_P2S_SCRIPT_SIZE = 201;
+
 enum txnouttype {
     TX_NONSTANDARD,
     // 'standard' transaction types:
-    TX_PUBKEY,
-    TX_PUBKEYHASH,
-    TX_SCRIPTHASH,
-    TX_MULTISIG,
+    TX_PUBKEY,     ///< p2pk
+    TX_PUBKEYHASH, ///< p2pkh
+    TX_SCRIPTHASH, ///< p2sh or p2sh32
+    TX_MULTISIG,   ///< bare multisig
     // unspendable OP_RETURN script that carries data
     TX_NULL_DATA,
+    // after upgrade12: p2s (pay-to-script); non-null-data bare scripts that don't match above and are <= 201 bytes
+    TX_SCRIPT,     ///< p2s
 };
 
 class CNoDestination {

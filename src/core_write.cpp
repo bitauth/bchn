@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2023 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -199,7 +199,10 @@ std::string EncodeHexTx(const CTransaction &tx) {
 UniValue::Object ScriptToUniv(const Config &config, const CScript &script, bool include_address,
                               bool include_type, bool include_pattern) {
     CTxDestination address;
-    const uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32 | SCRIPT_ENABLE_TOKENS;
+    // Enable all flags that may influence the correct parsing of a scriptPubKey now or in the future, even if such
+    // flags are not currently activated.
+    const uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32 | SCRIPT_ENABLE_TOKENS
+                           | SCRIPT_ENABLE_MAY2026;
     bool extracted = include_address && ExtractDestination(script, address, flags);
 
     UniValue::Object out;
