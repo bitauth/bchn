@@ -1,5 +1,5 @@
 // Copyright (c) 2017 The Bitcoin Core developers
-// Copyright (c) 2019-2024 The Bitcoin developers
+// Copyright (c) 2019-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,6 +15,8 @@
 #include <tinyformat.h>
 
 #include <boost/test/unit_test.hpp>
+
+#include <utility>
 
 // Append given push onto a script, using specific opcode (not necessarily
 // the minimal one, but must be able to contain the given data.)
@@ -43,9 +45,15 @@ void AppendPush(CScript &script, opcodetype opcode,
 BOOST_FIXTURE_TEST_SUITE(script_standard_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
-    for (const bool is_p2sh_32 : {false, true}) {
-        const uint32_t flags = is_p2sh_32 ? STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32
-                                          : STANDARD_SCRIPT_VERIFY_FLAGS & ~SCRIPT_ENABLE_P2SH_32;
+    using P = std::pair<bool, bool>;
+    for (const auto [enable_p2sh_32, enable_p2s] : {P{false, false}, P{false, true}, P{true, false}, P{true, true}}) {
+        uint32_t flags = enable_p2sh_32 ? STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32
+                                        : STANDARD_SCRIPT_VERIFY_FLAGS & ~SCRIPT_ENABLE_P2SH_32;
+        if (enable_p2s) {
+            flags |= SCRIPT_ENABLE_MAY2026;
+        } else {
+            flags &= ~SCRIPT_ENABLE_MAY2026;
+        }
 
         CKey keys[3];
         CPubKey pubkeys[3];
@@ -83,14 +91,14 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
         // TX_SCRIPTHASH (P2SH_32)
         s.clear();
         s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
-        if (is_p2sh_32) {
+        if (enable_p2sh_32) {
             // If we are looping and p2sh_32 is enabled, we expect this
             BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_SCRIPTHASH);
             BOOST_CHECK_EQUAL(solutions.size(), 1U);
             BOOST_CHECK(solutions[0] == ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)));
         } else {
             // Otherwise we expect this
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0U);
         }
 
@@ -126,7 +134,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
         // TX_WITNESS_V0_KEYHASH
         s.clear();
         s << OP_0 << ToByteVector(pubkeys[0].GetID());
-        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
         BOOST_CHECK_EQUAL(solutions.size(), 0U);
 
         // TX_WITNESS_V0_SCRIPTHASH
@@ -137,13 +145,28 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
 
         s.clear();
         s << OP_0 << ToByteVector(scriptHash);
-        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
         BOOST_CHECK_EQUAL(solutions.size(), 0U);
 
-        // TX_NONSTANDARD
+        // TX_SCRIPT (at 201 limit)
+        s.clear();
+        s << OP_9 << OP_2 << OP_ADD << OP_11 << OP_EQUALVERIFY << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE - 7, uint8_t(1));
+        BOOST_CHECK_EQUAL(s.size(), MAX_P2S_SCRIPT_SIZE);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(solutions.size(), 0);
+
+        // TX_NONSTANDARD (always, even if p2s is enabled, due to being over 201 limit)
+        s.clear();
+        s << OP_9 << OP_2 << OP_ADD << OP_11 << OP_EQUALVERIFY << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE - 7 + 1, uint8_t(1));
+        BOOST_CHECK_EQUAL(s.size(), MAX_P2S_SCRIPT_SIZE + 1);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(solutions.size(), 0);
+
+
+        // TX_NONSTANDARD (only if !p2s, otherwise TX_SCRIPT)
         s.clear();
         s << OP_9 << OP_ADD << OP_11 << OP_EQUAL;
-        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
         BOOST_CHECK_EQUAL(solutions.size(), 0);
 
         // Try some non-minimal PUSHDATA pushes in various standard scripts
@@ -152,7 +175,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s.clear();
             AppendPush(s, pushdataop, ToByteVector(pubkeys[0]));
             s << OP_CHECKSIG;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_PUBKEYHASH
@@ -160,7 +183,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s << OP_DUP << OP_HASH160;
             AppendPush(s, pushdataop, ToByteVector(pubkeys[0].GetID()));
             s << OP_EQUALVERIFY << OP_CHECKSIG;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_SCRIPTHASH
@@ -168,7 +191,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s << OP_HASH160;
             AppendPush(s, pushdataop, ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */)));
             s << OP_EQUAL;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_SCRIPTHASH (P2SH_32)
@@ -176,7 +199,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s << OP_HASH256;
             AppendPush(s, pushdataop, ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)));
             s << OP_EQUAL;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_MULTISIG -- pubkey
@@ -184,7 +207,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s << OP_1;
             AppendPush(s, pushdataop, ToByteVector(pubkeys[0]));
             s << ToByteVector(pubkeys[1]) << OP_2 << OP_CHECKMULTISIG;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_MULTISIG -- num_signatures
@@ -192,7 +215,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             AppendPush(s, pushdataop, {1});
             s << ToByteVector(pubkeys[0]) << ToByteVector(pubkeys[1]) << OP_2
               << OP_CHECKMULTISIG;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
 
             // mutated TX_MULTISIG -- num_pubkeys
@@ -200,7 +223,7 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
             s << OP_1 << ToByteVector(pubkeys[0]) << ToByteVector(pubkeys[1]);
             AppendPush(s, pushdataop, {2});
             s << OP_CHECKMULTISIG;
-            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
             BOOST_CHECK_EQUAL(solutions.size(), 0);
         }
 
@@ -209,12 +232,12 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_success) {
         s.clear();
         s << std::vector<uint8_t>{1} << ToByteVector(pubkeys[0])
           << ToByteVector(pubkeys[1]) << OP_2 << OP_CHECKMULTISIG;
-        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
         BOOST_CHECK_EQUAL(solutions.size(), 0);
         s.clear();
         s << OP_1 << ToByteVector(pubkeys[0]) << ToByteVector(pubkeys[1])
           << std::vector<uint8_t>{2} << OP_CHECKMULTISIG;
-        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+        BOOST_CHECK_EQUAL(Solver(s, solutions, flags), enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
         BOOST_CHECK_EQUAL(solutions.size(), 0);
 
         // Non-minimal pushes in OP_RETURN scripts are standard (some OP_RETURN
@@ -244,227 +267,316 @@ BOOST_AUTO_TEST_CASE(script_standard_Solver_failure) {
     s.clear();
     s << std::vector<uint8_t>(30, 0x01) << OP_CHECKSIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_PUBKEYHASH with incorrectly sized key hash
     s.clear();
     s << OP_DUP << OP_HASH160 << ToByteVector(pubkey) << OP_EQUALVERIFY
       << OP_CHECKSIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_SCRIPTHASH with incorrectly sized script hash
     s.clear();
     s << OP_HASH160 << std::vector<uint8_t>(21, 0x01) << OP_EQUAL;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_SCRIPTHASH P2SH_32 with incorrectly sized script hash
     s.clear();
     s << OP_HASH256 << std::vector<uint8_t>(33, 0x01) << OP_EQUAL;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_SCRIPTHASH P2SH_32 with SCRIPT_ENABLE_P2SH_32 disabled
     s.clear();
     s << OP_HASH256 << std::vector<uint8_t>(32, 0x01) << OP_EQUAL;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_P2SH_32), TX_SCRIPTHASH);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_P2SH_32 | SCRIPT_ENABLE_MAY2026), TX_SCRIPTHASH);
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags & ~SCRIPT_ENABLE_P2SH_32), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, (flags & ~SCRIPT_ENABLE_P2SH_32) | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_MULTISIG 0/2
     s.clear();
     s << OP_0 << ToByteVector(pubkey) << OP_1 << OP_CHECKMULTISIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_MULTISIG 2/1
     s.clear();
     s << OP_2 << ToByteVector(pubkey) << OP_1 << OP_CHECKMULTISIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_MULTISIG n = 2 with 1 pubkey
     s.clear();
     s << OP_1 << ToByteVector(pubkey) << OP_2 << OP_CHECKMULTISIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_MULTISIG n = 1 with 0 pubkeys
     s.clear();
     s << OP_1 << OP_1 << OP_CHECKMULTISIG;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_NULL_DATA with other opcodes
     s.clear();
     s << OP_RETURN << std::vector<uint8_t>({75}) << OP_ADD;
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_WITNESS with unknown version
     s.clear();
     s << OP_1 << ToByteVector(pubkey);
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
 
     // TX_WITNESS with incorrect program size
     s.clear();
     s << OP_0 << std::vector<uint8_t>(19, 0x01);
     BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
+
+    // TX_SCRIPT at the 201-byte limit
+    s.clear();
+    s << OP_1 << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE - 4, 0x01) << OP_DROP;
+    BOOST_CHECK_EQUAL(s.size(), MAX_P2S_SCRIPT_SIZE);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_SCRIPT);
+
+    // TX_NONSTANDARD (script past the 201-byte limit)
+    s.clear();
+    s << OP_1 << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE - 3, 0x01) << OP_DROP;
+    BOOST_CHECK_EQUAL(s.size(), MAX_P2S_SCRIPT_SIZE + 1);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags), TX_NONSTANDARD);
+    BOOST_CHECK_EQUAL(Solver(s, solutions, flags | SCRIPT_ENABLE_MAY2026), TX_NONSTANDARD);
 }
 
 BOOST_AUTO_TEST_CASE(script_standard_ExtractDestination) {
-    const uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32;
+    using P = std::pair<bool, bool>;
+    for (const auto [enable_p2s, enable_p2sh32] : {P{false, false}, P{false, true}, P{true, false}, P{true, true}}) {
+        uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS;
+        if (enable_p2sh32) {
+            flags |= SCRIPT_ENABLE_P2SH_32;
+        } else {
+            flags &= ~SCRIPT_ENABLE_P2SH_32;
+        }
+        if (enable_p2s) {
+            flags |= SCRIPT_ENABLE_MAY2026;
+        } else {
+            flags &= ~SCRIPT_ENABLE_MAY2026;
+        }
 
-    CKey key;
-    CPubKey pubkey;
-    key.MakeNewKey(true);
-    pubkey = key.GetPubKey();
+        CKey key;
+        CPubKey pubkey;
+        key.MakeNewKey(true);
+        pubkey = key.GetPubKey();
 
-    CScript s;
-    CTxDestination address;
+        CScript s;
+        CTxDestination address;
 
-    // TX_PUBKEY
-    s.clear();
-    s << ToByteVector(pubkey) << OP_CHECKSIG;
-    BOOST_CHECK(ExtractDestination(s, address, flags));
-    BOOST_CHECK(boost::get<CKeyID>(&address) &&
-                *boost::get<CKeyID>(&address) == pubkey.GetID());
+        // TX_PUBKEY
+        s.clear();
+        s << ToByteVector(pubkey) << OP_CHECKSIG;
+        BOOST_CHECK(ExtractDestination(s, address, flags));
+        BOOST_CHECK(boost::get<CKeyID>(&address) &&
+                    *boost::get<CKeyID>(&address) == pubkey.GetID());
+        address = {};
 
-    // TX_PUBKEYHASH
-    s.clear();
-    s << OP_DUP << OP_HASH160 << ToByteVector(pubkey.GetID()) << OP_EQUALVERIFY
-      << OP_CHECKSIG;
-    BOOST_CHECK(ExtractDestination(s, address, flags));
-    BOOST_CHECK(boost::get<CKeyID>(&address) &&
-                *boost::get<CKeyID>(&address) == pubkey.GetID());
+        // TX_PUBKEYHASH
+        s.clear();
+        s << OP_DUP << OP_HASH160 << ToByteVector(pubkey.GetID()) << OP_EQUALVERIFY
+          << OP_CHECKSIG;
+        BOOST_CHECK(ExtractDestination(s, address, flags));
+        BOOST_CHECK(boost::get<CKeyID>(&address) &&
+                    *boost::get<CKeyID>(&address) == pubkey.GetID());
+        address = {};
 
-    // TX_SCRIPTHASH
-    const CScript redeemScript(s); // initialize with leftover P2PKH script
-    s.clear();
-    s << OP_HASH160 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */)) << OP_EQUAL;
-    BOOST_CHECK(ExtractDestination(s, address, flags));
-    BOOST_CHECK(boost::get<ScriptID>(&address) &&
-                *boost::get<ScriptID>(&address) == ScriptID(redeemScript, false /* p2sh_20 */));
+        // TX_SCRIPTHASH
+        const CScript redeemScript(s); // initialize with leftover P2PKH script
+        s.clear();
+        s << OP_HASH160 << ToByteVector(ScriptID(redeemScript, false /* p2sh_32 */)) << OP_EQUAL;
+        BOOST_CHECK(ExtractDestination(s, address, flags));
+        BOOST_CHECK(boost::get<ScriptID>(&address) &&
+                    *boost::get<ScriptID>(&address) == ScriptID(redeemScript, false));
+        address = {};
 
-    // TX_SCRIPTHASH (P2SH_32)
-    s.clear();
-    s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
-    BOOST_CHECK(ExtractDestination(s, address, flags));
-    BOOST_CHECK(boost::get<ScriptID>(&address) &&
-                *boost::get<ScriptID>(&address) == ScriptID(redeemScript, true /* p2sh_32 */));
-    BOOST_CHECK_MESSAGE(!ExtractDestination(s, address, flags & ~SCRIPT_ENABLE_P2SH_32),
-                        strprintf("When disabling SCRIPT_ENABLE_P2SH_32, expected ExtractDestination to fail: %s",
-                                  ScriptToAsmStr(s)));
+        // TX_SCRIPTHASH (P2SH_32)
+        s.clear();
+        s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
+        if (enable_p2sh32) {
+            BOOST_CHECK(ExtractDestination(s, address, flags));
+            BOOST_CHECK(boost::get<ScriptID>(&address) &&
+                        *boost::get<ScriptID>(&address) == ScriptID(redeemScript, true /* p2sh_32 */));
+        } else {
+            BOOST_CHECK_MESSAGE(!ExtractDestination(s, address, flags),
+                                strprintf("When disabling SCRIPT_ENABLE_P2SH_32, expected ExtractDestination to fail: %s",
+                                          ScriptToAsmStr(s)));
+        }
+        address = {};
 
-    // TX_MULTISIG
-    s.clear();
-    s << OP_1 << ToByteVector(pubkey) << OP_1 << OP_CHECKMULTISIG;
-    BOOST_CHECK(!ExtractDestination(s, address, flags));
+        // TX_MULTISIG
+        s.clear();
+        s << OP_1 << ToByteVector(pubkey) << OP_1 << OP_CHECKMULTISIG;
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
 
-    // TX_NULL_DATA
-    s.clear();
-    s << OP_RETURN << std::vector<uint8_t>({75});
-    BOOST_CHECK(!ExtractDestination(s, address, flags));
+        // TX_NULL_DATA
+        s.clear();
+        s << OP_RETURN << std::vector<uint8_t>({75});
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
 
-    // TX_WITNESS_V0_KEYHASH
-    s.clear();
-    s << OP_0 << ToByteVector(pubkey);
-    BOOST_CHECK(!ExtractDestination(s, address, flags));
+        // TX_WITNESS_V0_KEYHASH
+        s.clear();
+        s << OP_0 << ToByteVector(pubkey);
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
 
-    // TX_WITNESS_V0_SCRIPTHASH
-    s.clear();
-    s << OP_0 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */));
-    BOOST_CHECK(!ExtractDestination(s, address, flags));
+        // TX_WITNESS_V0_SCRIPTHASH
+        s.clear();
+        s << OP_0 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */));
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
 
-    // TX_WITNESS_V0_SCRIPTHASH (P2SH32; nonsensical)
-    s.clear();
-    s << OP_0 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */));
-    BOOST_CHECK(!ExtractDestination(s, address, flags));
+        // TX_WITNESS_V0_SCRIPTHASH (P2SH32; nonsensical)
+        s.clear();
+        s << OP_0 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */));
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
+
+        // TX_SCRIPT
+        s.clear();
+        s << OP_1 << ToByteVector(redeemScript);
+        BOOST_CHECK_LE(s.size(), MAX_P2S_SCRIPT_SIZE);
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
+
+        // TX_NONSTANDARD
+        s.clear();
+        s << OP_1 << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE, 0xfe);
+        BOOST_CHECK_GT(s.size(), MAX_P2S_SCRIPT_SIZE);
+        BOOST_CHECK(!ExtractDestination(s, address, flags));
+        BOOST_CHECK(!IsValidDestination(address));
+    }
 }
 
 BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
-    const uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS | SCRIPT_ENABLE_P2SH_32;
+    using P = std::pair<bool, bool>;
+    for (const auto [enable_p2s, enable_p2sh32] : {P{false, false}, P{false, true}, P{true, false}, P{true, true}}) {
+        uint32_t flags = STANDARD_SCRIPT_VERIFY_FLAGS;
+        if (enable_p2sh32) {
+            flags |= SCRIPT_ENABLE_P2SH_32;
+        } else {
+            flags &= ~SCRIPT_ENABLE_P2SH_32;
+        }
+        if (enable_p2s) {
+            flags |= SCRIPT_ENABLE_MAY2026;
+        } else {
+            flags &= ~SCRIPT_ENABLE_MAY2026;
+        }
 
-    CKey keys[3];
-    CPubKey pubkeys[3];
-    for (int i = 0; i < 3; i++) {
-        keys[i].MakeNewKey(true);
-        pubkeys[i] = keys[i].GetPubKey();
+        CKey keys[3];
+        CPubKey pubkeys[3];
+        for (int i = 0; i < 3; i++) {
+            keys[i].MakeNewKey(true);
+            pubkeys[i] = keys[i].GetPubKey();
+        }
+
+        CScript s;
+        txnouttype whichType;
+        std::vector<CTxDestination> addresses;
+        int nRequired;
+
+        // TX_PUBKEY
+        s.clear();
+        s << ToByteVector(pubkeys[0]) << OP_CHECKSIG;
+        BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, TX_PUBKEY);
+        BOOST_CHECK_EQUAL(addresses.size(), 1U);
+        BOOST_CHECK_EQUAL(nRequired, 1);
+        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
+                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+
+        // TX_PUBKEYHASH
+        s.clear();
+        s << OP_DUP << OP_HASH160 << ToByteVector(pubkeys[0].GetID())
+          << OP_EQUALVERIFY << OP_CHECKSIG;
+        BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, TX_PUBKEYHASH);
+        BOOST_CHECK_EQUAL(addresses.size(), 1U);
+        BOOST_CHECK_EQUAL(nRequired, 1);
+        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
+                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+
+        // TX_SCRIPTHASH
+        // initialize with leftover P2PKH script
+        const CScript redeemScript(s);
+        s.clear();
+        s << OP_HASH160 << ToByteVector(ScriptID(redeemScript, false /* p2sh_32 */)) << OP_EQUAL;
+        BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
+        BOOST_CHECK_EQUAL(addresses.size(), 1U);
+        BOOST_CHECK_EQUAL(nRequired, 1);
+        BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
+                    *boost::get<ScriptID>(&addresses[0]) ==
+                        ScriptID(redeemScript, false /* p2sh_32 */));
+
+        // TX_SCRIPTHASH (P2SH_32)
+        // initialize with leftover P2PKH script
+        s.clear();
+        s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
+        if (enable_p2sh32) {
+            BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
+            BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
+            BOOST_CHECK_EQUAL(addresses.size(), 1U);
+            BOOST_CHECK_EQUAL(nRequired, 1);
+            BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
+                        *boost::get<ScriptID>(&addresses[0]) == ScriptID(redeemScript, true /* p2sh_32 */));
+        } else {
+            BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
+            BOOST_CHECK_EQUAL(whichType, enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
+            BOOST_CHECK_EQUAL(addresses.size(), 0U);
+        }
+
+        // TX_MULTISIG
+        s.clear();
+        s << OP_2 << ToByteVector(pubkeys[0]) << ToByteVector(pubkeys[1]) << OP_2
+          << OP_CHECKMULTISIG;
+        BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, TX_MULTISIG);
+        BOOST_CHECK_EQUAL(addresses.size(), 2U);
+        BOOST_CHECK_EQUAL(nRequired, 2);
+        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
+                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+        BOOST_CHECK(boost::get<CKeyID>(&addresses[1]) &&
+                    *boost::get<CKeyID>(&addresses[1]) == pubkeys[1].GetID());
+
+        // TX_NULL_DATA
+        s.clear();
+        s << OP_RETURN << std::vector<uint8_t>({75});
+        BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, TX_NULL_DATA);
+
+        // TX_WITNESS_V0_KEYHASH
+        s.clear();
+        s << OP_0 << ToByteVector(pubkeys[0].GetID());
+        BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
+
+        // TX_WITNESS_V0_SCRIPTHASH
+        s.clear();
+        s << OP_0 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */));
+        BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
+
+        // TX_WITNESS_V0_SCRIPTHASH using p2sh_32 (nonsenical)
+        s.clear();
+        s << OP_0 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */));
+        BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
+        BOOST_CHECK_EQUAL(whichType, enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
     }
-
-    CScript s;
-    txnouttype whichType;
-    std::vector<CTxDestination> addresses;
-    int nRequired;
-
-    // TX_PUBKEY
-    s.clear();
-    s << ToByteVector(pubkeys[0]) << OP_CHECKSIG;
-    BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
-    BOOST_CHECK_EQUAL(whichType, TX_PUBKEY);
-    BOOST_CHECK_EQUAL(addresses.size(), 1U);
-    BOOST_CHECK_EQUAL(nRequired, 1);
-    BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
-
-    // TX_PUBKEYHASH
-    s.clear();
-    s << OP_DUP << OP_HASH160 << ToByteVector(pubkeys[0].GetID())
-      << OP_EQUALVERIFY << OP_CHECKSIG;
-    BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
-    BOOST_CHECK_EQUAL(whichType, TX_PUBKEYHASH);
-    BOOST_CHECK_EQUAL(addresses.size(), 1U);
-    BOOST_CHECK_EQUAL(nRequired, 1);
-    BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
-
-    // TX_SCRIPTHASH
-    // initialize with leftover P2PKH script
-    const CScript redeemScript(s);
-    s.clear();
-    s << OP_HASH160 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */)) << OP_EQUAL;
-    BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
-    BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
-    BOOST_CHECK_EQUAL(addresses.size(), 1U);
-    BOOST_CHECK_EQUAL(nRequired, 1);
-    BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
-                *boost::get<ScriptID>(&addresses[0]) ==
-                    ScriptID(redeemScript, false /* p2sh_20 */));
-
-    // TX_SCRIPTHASH (P2SH_32)
-    // initialize with leftover P2PKH script
-    s.clear();
-    s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
-    BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
-    BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
-    BOOST_CHECK_EQUAL(addresses.size(), 1U);
-    BOOST_CHECK_EQUAL(nRequired, 1);
-    BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
-                *boost::get<ScriptID>(&addresses[0]) == ScriptID(redeemScript, true /* p2sh_32 */));
-
-    // TX_MULTISIG
-    s.clear();
-    s << OP_2 << ToByteVector(pubkeys[0]) << ToByteVector(pubkeys[1]) << OP_2
-      << OP_CHECKMULTISIG;
-    BOOST_CHECK(ExtractDestinations(s, whichType, addresses, nRequired, flags));
-    BOOST_CHECK_EQUAL(whichType, TX_MULTISIG);
-    BOOST_CHECK_EQUAL(addresses.size(), 2U);
-    BOOST_CHECK_EQUAL(nRequired, 2);
-    BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
-    BOOST_CHECK(boost::get<CKeyID>(&addresses[1]) &&
-                *boost::get<CKeyID>(&addresses[1]) == pubkeys[1].GetID());
-
-    // TX_NULL_DATA
-    s.clear();
-    s << OP_RETURN << std::vector<uint8_t>({75});
-    BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
-
-    // TX_WITNESS_V0_KEYHASH
-    s.clear();
-    s << OP_0 << ToByteVector(pubkeys[0].GetID());
-    BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
-
-    // TX_WITNESS_V0_SCRIPTHASH
-    s.clear();
-    s << OP_0 << ToByteVector(ScriptID(redeemScript, false /* p2sh_20 */));
-    BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
-
-    // TX_WITNESS_V0_SCRIPTHASH using p2sh_32 (nonsenical)
-    s.clear();
-    s << OP_0 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */));
-    BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
 }
 
 BOOST_AUTO_TEST_CASE(script_standard_GetScriptFor_) {
@@ -734,6 +846,19 @@ BOOST_AUTO_TEST_CASE(script_standard_IsMine) {
 
         scriptPubKey.clear();
         scriptPubKey << OP_9 << OP_ADD << OP_11 << OP_EQUAL;
+
+        result = IsMine(keystore, scriptPubKey);
+        BOOST_CHECK_EQUAL(result, ISMINE_NO);
+    }
+
+    // Nonstandard, over p2s limit
+    {
+        CBasicKeyStore keystore;
+        BOOST_CHECK(keystore.AddKey(keys[0]));
+
+        scriptPubKey.clear();
+        scriptPubKey << std::vector<uint8_t>(MAX_P2S_SCRIPT_SIZE, 0xef);
+        BOOST_CHECK_GT(scriptPubKey.size(), MAX_P2S_SCRIPT_SIZE);
 
         result = IsMine(keystore, scriptPubKey);
         BOOST_CHECK_EQUAL(result, ISMINE_NO);

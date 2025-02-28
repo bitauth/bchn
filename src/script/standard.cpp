@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2022 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -33,6 +33,8 @@ const char *GetTxnOutputType(txnouttype t) {
             return "multisig";
         case TX_NULL_DATA:
             return "nulldata";
+        case TX_SCRIPT:
+            return "script";
     }
     return nullptr;
 }
@@ -142,6 +144,12 @@ txnouttype Solver(const CScript &scriptPubKey, std::vector<std::vector<uint8_t>>
         // safe as size is in range 1..16
         vSolutionsRet.push_back({static_cast<uint8_t>(keys.size())});
         return TX_MULTISIG;
+    }
+
+    // After upgrade12: Any script that doesn't match any of the above and is <= 201 bytes is pay-to-script (p2s),
+    // and is considered standard.
+    if (flags & SCRIPT_ENABLE_MAY2026 && scriptPubKey.size() <= MAX_P2S_SCRIPT_SIZE) {
+        return TX_SCRIPT;
     }
 
     vSolutionsRet.clear();
