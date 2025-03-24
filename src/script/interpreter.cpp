@@ -168,23 +168,30 @@ public:
     constexpr uint32_t size() const noexcept { return m_stack_size; }
 };
 
-// Encapsulates a control frame. Each control frame has its own conditional stack, script, etc. TODO: More description.
+// Encapsulates a control frame. Needed to support OP_EVAL. Each control frame has its own conditional stack, script,
+// etc. TODO: More description.
 struct ControlFrame {
     const size_t cumulativeVfExecSize = 0;  ///< Cumulative vfExec.size() for all control frames below this.
-    using VarScriptOrPtr = std::variant<CScript, const CScript *>;
-    const VarScriptOrPtr varScript;
-    ConditionStack vfExec;
-    CScript::const_iterator pc;
-    CScript::const_iterator pbegincodehash;
-    const CScript::const_iterator pend;
+    using VarScriptOrPtr = std::variant<std::vector<uint8_t>, const CScript *>;
+    const VarScriptOrPtr varScript; ///< Either a weak pointer the top-level script, or an owned byte blob (for OP_EVAL'd scripts)
+    ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
+    const uint8_t *pc;              ///< Initially equal to scriptBegin(), but updated as we execute the script's code
+    const uint8_t *pbegincodehash;  ///< Ititially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
     ControlFrame(size_t cumSize, VarScriptOrPtr &&vscript)
         : cumulativeVfExecSize(cumSize), varScript{std::move(vscript)},
-          pc{script().begin()}, pbegincodehash{pc}, pend{script().end()} {}
+          pc{scriptBegin()}, pbegincodehash{pc} {}
 
-    const CScript &script() const {
-        return std::visit(util::Overloaded{[](const CScript &s) -> const CScript & { return s; },
-                                           [](const CScript *ps) -> const CScript & { return *ps; }},
+    const uint8_t *scriptBegin() const {
+        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.data(); },
+                                           [](const CScript *ps) { return ps->data(); }},
+                          varScript);
+    }
+    const uint8_t *scriptEnd() const { return scriptBegin() + scriptSize(); }
+
+    size_t scriptSize() const {
+        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.size(); },
+                                           [](const CScript *ps) -> size_t { return ps->size(); }},
                           varScript);
     }
 };
@@ -200,7 +207,12 @@ public:
     }
 
     ControlFrame &pushFrame(ControlFrame::VarScriptOrPtr &&varScript) {
-        return controlFrames.emplace_back(depth(true), std::move(varScript));
+        auto &newFrame = controlFrames.emplace_back(depth(true), std::move(varScript));
+        if (newFrame.scriptSize() > MAX_SCRIPT_SIZE) {
+            popFrame();
+            throw ScriptEvaluationError(ScriptErrorString(ScriptError::SCRIPT_SIZE), ScriptError::SCRIPT_SIZE);
+        }
+        return newFrame;
     }
 
     void popFrame() {
@@ -269,16 +281,15 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
     bool const may2026Enabled = (flags & SCRIPT_ENABLE_MAY2026) != 0;
 
     try {
-        ControlStack controlStack(&initialScript); // initial frame for the script (zero copy, just takes the pointer)
+        // Initial frame for the top-level script (zero copy, just takes the pointer).
+        // Note that we check if the script is <= MAX_SCRIPT_SIZE in the ControlStack c'tor, which may throw here.
+        ControlStack controlStack(&initialScript);
+
         do {
             ControlFrame &curFrame = controlStack.top();
-            const CScript &script = curFrame.script();
-            if (script.size() > MAX_SCRIPT_SIZE) {
-                return set_error(serror, ScriptError::SCRIPT_SIZE);
-            }
-            CScript::const_iterator &pc = curFrame.pc;
-            CScript::const_iterator &pbegincodehash = curFrame.pbegincodehash;
-            const CScript::const_iterator &pend = curFrame.pend;
+            const uint8_t *&pc = curFrame.pc;
+            const uint8_t *&pbegincodehash = curFrame.pbegincodehash;
+            const uint8_t *const pend = curFrame.scriptEnd();
             ConditionStack &vfExec = curFrame.vfExec;
             bool newControlFrameWasPushed = false;
 
@@ -290,7 +301,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                 //
                 opcodetype opcode;
                 valtype vchPushValue;
-                if (!script.GetOp(pc, opcode, vchPushValue)) {
+                if (!GetScriptOp(pc, pend, opcode, &vchPushValue)) {
                     return set_error(serror, ScriptError::BAD_OPCODE);
                 }
                 if (vchPushValue.size() > maxScriptElementSize) {
@@ -464,7 +475,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
                             }
 
-                            controlStack.pushFrame(CScript{stacktop(-1)});
+                            controlStack.pushFrame(std::move(stacktop(-1)));
                             popstack(stack);
                             newControlFrameWasPushed = true;
 
@@ -1588,10 +1599,10 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 case OP_ACTIVEBYTECODE: {
                                     // Subset of script starting at the most recent code separator (if any)
                                     // or the entire script if no code separators are present.
-                                    if (size_t(script.end() - pbegincodehash) > maxScriptElementSize) {
+                                    if (static_cast<size_t>(pend - pbegincodehash) > maxScriptElementSize) {
                                         return set_error(serror, ScriptError::PUSH_SIZE);
                                     }
-                                    stack.emplace_back(pbegincodehash, script.end());
+                                    stack.emplace_back(pbegincodehash, pend);
                                 } break;
                                 case OP_TXVERSION: {
                                     auto const bn = CScriptNum::fromInt(context->tx().nVersion()).value();
@@ -1968,7 +1979,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
             controlStack.popFrame();
 
         } while (!controlStack.empty()); // end outer do loop
-    } catch (const scriptnum_error &e) {
+    } catch (const ScriptEvaluationError &e) {
         return set_error(serror, e.scriptError);
     } catch (...) {
         return set_error(serror, ScriptError::UNKNOWN);
