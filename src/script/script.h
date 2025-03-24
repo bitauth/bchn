@@ -22,6 +22,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 template <typename T> std::vector<uint8_t> ToByteVector(const T &in) {
@@ -225,12 +226,16 @@ const char *GetOpName(opcodetype opcode);
  */
 bool CheckMinimalPush(const std::vector<uint8_t> &data, opcodetype opcode);
 
-struct scriptnum_error : std::runtime_error {
+// Used by EvalScript() internally in interpreter.cpp
+struct ScriptEvaluationError : std::runtime_error {
     ScriptError scriptError;
-    explicit
-    scriptnum_error(const std::string &str, ScriptError err = ScriptError::UNKNOWN)
-        : std::runtime_error(str), scriptError(err)
-    {}
+    explicit ScriptEvaluationError(const std::string &str, ScriptError err = ScriptError::UNKNOWN)
+        : std::runtime_error(str), scriptError(err) {}
+};
+
+// Subclass of above, used in the ScriptNum classes below to indicate encoding, overflow, or other script num error.
+struct scriptnum_error : ScriptEvaluationError {
+    using ScriptEvaluationError::ScriptEvaluationError;
 };
 
 /**
@@ -714,11 +719,11 @@ private:
  * elements. Tests in October 2015 showed use of this reduced dbcache memory
  * usage by 23% and made an initial sync 13% faster.
  */
-typedef prevector<28, uint8_t> CScriptBase;
+using CScriptBase = prevector<28, uint8_t>;
 
-bool GetScriptOp(CScriptBase::const_iterator &pc,
-                 CScriptBase::const_iterator end, opcodetype &opcodeRet,
-                 std::vector<uint8_t> *pvchRet);
+template <typename It, std::enable_if_t<   std::is_same_v<It, CScriptBase::const_iterator>
+                                        || std::is_same_v<It, const uint8_t *>, int> = 0>
+bool GetScriptOp(It &pc, It end, opcodetype &opcodeRet, std::vector<uint8_t> *pvchRet);
 
 /** Serialized script, used inside transaction inputs and outputs */
 class CScript : public CScriptBase {
