@@ -99,3 +99,9 @@ public:
 };
 
 } // namespace may2025
+
+// The below constants are used after activation of the May 2026 upgrade (Upgrade12)
+namespace may2026 {
+// Control stack depth limit (max cumulative depth of OP_IF, OP_EVAL, OP_BEGIN and friends)
+static constexpr unsigned int MAX_CONTROL_STACK_DEPTH = may2025::MAX_CONDITIONAL_STACK_DEPTH;
+} // namespace may2026

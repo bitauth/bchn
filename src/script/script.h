@@ -58,7 +58,8 @@ enum opcodetype {
 
     // control
     OP_NOP = 0x61,
-    OP_VER = 0x62,
+    /* OP_VER = 0x62, */ // Historical (early Bitcoin)
+    OP_EVAL = 0x62,      // after upgrade12 (May 2026)
     OP_IF = 0x63,
     OP_NOTIF = 0x64,
     OP_VERIF = 0x65,

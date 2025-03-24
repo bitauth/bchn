@@ -63,8 +63,8 @@ const char *GetOpName(opcodetype opcode) {
         // control
         case OP_NOP:
             return "OP_NOP";
-        case OP_VER:
-            return "OP_VER";
+        case OP_EVAL:
+            return "OP_EVAL";
         case OP_IF:
             return "OP_IF";
         case OP_NOTIF:
