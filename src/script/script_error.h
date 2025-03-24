@@ -98,6 +98,9 @@ enum class ScriptError {
     /* Big Integers */
     INVALID_NUMBER_RANGE_BIG_INT,
 
+    /* Control stack depth */
+    CONTROL_STACK_DEPTH,
+
     ERROR_COUNT,
 };
 

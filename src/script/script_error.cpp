@@ -131,6 +131,10 @@ const char *ScriptErrorString(const ScriptError serror) {
         case ScriptError::INVALID_NUMBER_RANGE_BIG_INT:
             return "Given operand is not a number within the valid range [-2^79,999 + 1, 2^79,999 - 1]";
 
+        // Upgrade 12
+        case ScriptError::CONTROL_STACK_DEPTH:
+            return "Control stack depth limit exceeded";
+
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:
         default:
