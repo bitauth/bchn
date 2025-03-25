@@ -15,10 +15,10 @@
 #include <script/script.h>
 #include <script/script_flags.h>
 #include <script/sigencoding.h>
+#include <span.h>
 #include <tinyformat.h>
 #include <uint256.h>
 #include <util/bitmanip.h>
-#include <util/overloaded.h>
 
 #include <list>
 #include <variant>
@@ -168,19 +168,17 @@ public:
     constexpr uint32_t size() const noexcept { return m_stack_size; }
 };
 
-/// Either a weak pointer the top-level CScript being evaluated, or an owned byte blob (for OP_EVAL'd scripts)
-struct VarScriptOrPtr : std::variant<std::vector<uint8_t>, const CScript *> {
+/// Either a byte blob from the stack that we own (for OP_EVAL support), or a Span as a view into top-level script.
+struct VarScriptOrPtr : std::variant<valtype, Span<const uint8_t>> {
     using variant::variant; // inherit all c'tors
 
     const uint8_t *begin() const {
-        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.data(); },
-                                           [](const CScript *ps) { return ps->data(); }}, *this);
+        return std::visit([](const Span<const uint8_t> &s) { return s.data(); }, *this); // lambda matches both variants
     }
     const uint8_t *end() const { return begin() + size(); }
 
     size_t size() const {
-        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.size(); },
-                                           [](const CScript *ps) -> size_t { return ps->size(); }}, *this);
+        return std::visit([](const Span<const uint8_t> &s) { return s.size(); }, *this); // lambda matches both variants
     }
 };
 
@@ -204,7 +202,7 @@ class ControlStack {
 public:
     explicit ControlStack(const CScript *outermostScript) {
         assert(outermostScript != nullptr);
-        pushFrame(outermostScript);
+        pushFrame(Span{*outermostScript});
     }
 
     ControlFrame &pushFrame(VarScriptOrPtr &&varScript) {
