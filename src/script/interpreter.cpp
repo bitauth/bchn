@@ -168,32 +168,33 @@ public:
     constexpr uint32_t size() const noexcept { return m_stack_size; }
 };
 
+/// Either a weak pointer the top-level CScript being evaluated, or an owned byte blob (for OP_EVAL'd scripts)
+struct VarScriptOrPtr : std::variant<std::vector<uint8_t>, const CScript *> {
+    using variant::variant; // inherit all c'tors
+
+    const uint8_t *begin() const {
+        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.data(); },
+                                           [](const CScript *ps) { return ps->data(); }}, *this);
+    }
+    const uint8_t *end() const { return begin() + size(); }
+
+    size_t size() const {
+        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.size(); },
+                                           [](const CScript *ps) -> size_t { return ps->size(); }}, *this);
+    }
+};
+
 // Encapsulates a control frame. Needed to support OP_EVAL. Each control frame has its own conditional stack, script,
-// etc. TODO: More description.
+// program counter, etc.
 struct ControlFrame {
     const size_t cumulativeVfExecSize = 0;  ///< Cumulative vfExec.size() for all control frames below this.
-    using VarScriptOrPtr = std::variant<std::vector<uint8_t>, const CScript *>;
-    const VarScriptOrPtr varScript; ///< Either a weak pointer the top-level script, or an owned byte blob (for OP_EVAL'd scripts)
+    const VarScriptOrPtr varScript;
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
-    const uint8_t *pc;              ///< Initially equal to scriptBegin(), but updated as we execute the script's code
+    const uint8_t *pc;              ///< Initially equal to varScript.begin(), but updated as we execute the script's code
     const uint8_t *pbegincodehash;  ///< Ititially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
     ControlFrame(size_t cumSize, VarScriptOrPtr &&vscript)
-        : cumulativeVfExecSize(cumSize), varScript{std::move(vscript)},
-          pc{scriptBegin()}, pbegincodehash{pc} {}
-
-    const uint8_t *scriptBegin() const {
-        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.data(); },
-                                           [](const CScript *ps) { return ps->data(); }},
-                          varScript);
-    }
-    const uint8_t *scriptEnd() const { return scriptBegin() + scriptSize(); }
-
-    size_t scriptSize() const {
-        return std::visit(util::Overloaded{[](const std::vector<uint8_t> &s) { return s.size(); },
-                                           [](const CScript *ps) -> size_t { return ps->size(); }},
-                          varScript);
-    }
+        : cumulativeVfExecSize(cumSize), varScript{std::move(vscript)}, pc{varScript.begin()}, pbegincodehash{pc} {}
 };
 
 // The control stack used to support OP_EVAL. TODO: More description.
@@ -206,13 +207,11 @@ public:
         pushFrame(outermostScript);
     }
 
-    ControlFrame &pushFrame(ControlFrame::VarScriptOrPtr &&varScript) {
-        auto &newFrame = controlFrames.emplace_back(depth(true), std::move(varScript));
-        if (newFrame.scriptSize() > MAX_SCRIPT_SIZE) {
-            popFrame();
+    ControlFrame &pushFrame(VarScriptOrPtr &&varScript) {
+        if (varScript.size() > MAX_SCRIPT_SIZE) {
             throw ScriptEvaluationError(ScriptErrorString(ScriptError::SCRIPT_SIZE), ScriptError::SCRIPT_SIZE);
         }
-        return newFrame;
+        return controlFrames.emplace_back(depth(true), std::move(varScript));
     }
 
     void popFrame() {
@@ -289,7 +288,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
             ControlFrame &curFrame = controlStack.top();
             const uint8_t *&pc = curFrame.pc;
             const uint8_t *&pbegincodehash = curFrame.pbegincodehash;
-            const uint8_t *const pend = curFrame.scriptEnd();
+            const uint8_t *const pend = curFrame.varScript.end();
             ConditionStack &vfExec = curFrame.vfExec;
             bool newControlFrameWasPushed = false;
 
@@ -1927,7 +1926,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
                         default:
                             return set_error(serror, ScriptError::BAD_OPCODE);
-                    } // end switch (opcodetype)
+                    } // end switch (opcode)
                 } // end if (vfExec)
 
                 // Size limits
