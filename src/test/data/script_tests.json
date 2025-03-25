@@ -36,7 +36,7 @@
 ["0", "IF 0x50 ENDIF 1", "P2SH,STRICTENC", "OK", "0x50 is reserved (ok if not executed)"],
 ["0x51", "0x5f ADD 0x60 EQUAL", "P2SH,STRICTENC", "OK", "0x51 through 0x60 push 1 through 16 onto stack"],
 ["1","NOP", "P2SH,STRICTENC", "OK"],
-["0", "IF VER ELSE 1 ENDIF", "P2SH,STRICTENC", "OK", "VER non-functional (ok if not executed)"],
+["0", "IF EVAL ELSE 1 ENDIF", "P2SH,STRICTENC", "OK", "OP_EVAL with empty stack (ok if not executed)"],
 ["0", "IF RESERVED RESERVED1 RESERVED2 RESERVED3 RESERVED4 ELSE 1 ENDIF", "P2SH,STRICTENC", "OK", "RESERVED ok in un-executed IF"],
 
 ["1", "DUP IF ENDIF", "P2SH,STRICTENC", "OK"],
@@ -954,7 +954,7 @@
 ["1", "IF 0x50 ENDIF 1", "P2SH,STRICTENC","BAD_OPCODE", "0x50 is reserved"],
 ["0x52", "0x5f ADD 0x60 EQUAL", "P2SH,STRICTENC","EVAL_FALSE", "0x51 through 0x60 push 1 through 16 onto stack"],
 ["0","NOP", "P2SH,STRICTENC","EVAL_FALSE",""],
-["1", "IF VER ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "VER non-functional"],
+["1", "IF EVAL ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "EVAL not enabled"],
 ["0", "IF VERIF ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "VERIF illegal everywhere"],
 ["0", "IF ELSE 1 ELSE VERIF ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "VERIF illegal everywhere"],
 ["0", "IF VERNOTIF ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "VERNOTIF illegal everywhere"],
@@ -1568,7 +1568,7 @@
 
 ["NOP1","NOP10", "P2SH,STRICTENC", "EVAL_FALSE"],
 
-["1","VER", "P2SH,STRICTENC", "BAD_OPCODE", "OP_VER is reserved"],
+["1","EVAL", "P2SH,STRICTENC", "BAD_OPCODE", "OP_EVAL is disabled with these flags"],
 ["1","VERIF", "P2SH,STRICTENC", "BAD_OPCODE", "OP_VERIF is reserved"],
 ["1","VERNOTIF", "P2SH,STRICTENC", "BAD_OPCODE", "OP_VERNOTIF is reserved"],
 ["1","RESERVED", "P2SH,STRICTENC", "BAD_OPCODE", "OP_RESERVED is reserved"],
@@ -1700,7 +1700,7 @@
 ["NOP1 0x01 1", "HASH160 0x14 0xda1745e9b549bd0bfa1a569971c77eba30cd5a4b EQUAL", "P2SH,STRICTENC", "SIG_PUSHONLY"],
 
 ["0 0x01 0x50", "HASH160 0x14 0xece424a6bb6ddf4db592c0faed60685047a361b1 EQUAL", "P2SH,STRICTENC", "BAD_OPCODE", "OP_RESERVED in P2SH should fail"],
-["0 0x01 VER", "HASH160 0x14 0x0f4d7845db968f2a81b530b6f3c1d6246d4c7e01 EQUAL", "P2SH,STRICTENC", "BAD_OPCODE", "OP_VER in P2SH should fail"],
+["0 0x01 EVAL", "HASH160 0x14 0x0f4d7845db968f2a81b530b6f3c1d6246d4c7e01 EQUAL", "P2SH,STRICTENC", "BAD_OPCODE", "OP_EVAL (not enabled) in P2SH should fail"],
 
 ["0x00", "'00' EQUAL", "P2SH,STRICTENC", "EVAL_FALSE", "Basic OP_0 execution"],
 
