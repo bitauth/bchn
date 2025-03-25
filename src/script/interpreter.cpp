@@ -231,7 +231,7 @@ struct EvalFrame {
 
     void processIf(bool val) {
         vfExec.push_back(val);
-        controlStack.push_back(nullptr);
+        controlStack.push_back(nullptr); // Indicate that the innermost control block is OP_IF/OP_NOTIF
     }
     [[nodiscard]] bool processEndIf(ScriptError *serror) {
         if (vfExec.empty()) {
@@ -239,7 +239,7 @@ struct EvalFrame {
             return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
         }
         if (controlStackTop()) {
-            // Inner-most control block is OP_BEGIN, so OP_ENDIF makes no sense here
+            // Inner-most control block is OP_BEGIN, so OP_ENDIF violates proper control structure
             return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
         }
         if (!controlStack.empty()) {
@@ -255,10 +255,10 @@ struct EvalFrame {
             return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
         }
         if (controlStackTop()) {
-            // Inner-most control block is OP_BEGIN, so OP_ENDIF makes no sense here
+            // Inner-most control block is OP_BEGIN, so OP_ENDIF violates proper control structure
             return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
         }
-        vfExec.toggle_top(); // tell the condition stack to invert its exec flag (to take or ignore the upcoming branch)
+        vfExec.toggle_top(); // Tell the condition stack to invert its exec flag (to take or ignore the upcoming branch)
         return true;
     }
 };
@@ -443,6 +443,9 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             // for a CheckMinimalPush here.
                         } break;
 
+                        case OP_NOP:
+                            break;
+
                         case OP_CHECKLOCKTIMEVERIFY: {
                             if (!(flags & SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY)) {
                                 break;
@@ -543,9 +546,9 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                         } break;
 
-                        case OP_NOP:
-                            break;
-
+                        //
+                        // Control
+                        //
                         case OP_EVAL: {
                             if (!may2026Enabled) {
                                 // Upgrade 12 not yet activated, treat as bad opcode.
@@ -561,9 +564,6 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             newEvalFrameWasPushed = true;
                         } break;
 
-                        //
-                        // Control
-                        //
                         case OP_IF:
                         case OP_NOTIF: {
                             // <expression> if [statements] [else [statements]]
@@ -599,7 +599,8 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             if ( ! may2026Enabled) {
                                 return set_error(serror, ScriptError::BAD_OPCODE);
                             }
-                            // unconditionally push program counter, even if !fExec, to keep track of proper control flow structures
+                            // Unconditionally push program counter, even if !fExec, to keep track of proper control-
+                            // flow structures.
                             curFrame.loopBeginPushPC();
                         } break;
 
@@ -2089,7 +2090,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
             }
 
             // End of either `initialScript` or of an OP_EVAL'd inner script, pop this frame.
-            // Note that this invalidates refs to: `curFrame`, `script`, `pc`, `pbegincodehash`, `pend`, `vfExec`
+            // Note that this invalidates refs to: `curFrame`, `pc`, `pbegincodehash`, `pend`
             evalStack.popFrame();
 
         } while (!evalStack.empty()); // end outer do loop
