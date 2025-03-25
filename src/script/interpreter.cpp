@@ -168,7 +168,13 @@ public:
     constexpr uint32_t size() const noexcept { return m_stack_size; }
 };
 
-/// Either a byte blob from the stack that we own (for OP_EVAL support), or a Span as a view into top-level script.
+/**
+ *  Encapsulates either a script byte blob (value type) owned by this instance, or a "view" into an existing script
+ *  byte blob (view type) that is owned by some other object with a longer lifetime than this instance.
+ *
+ *  This type is necessary for OP_EVAL support in order to be able to efficiently handle both stack-data-as-scripts
+ *  (std::vector) and CScript in a uniform way.
+ */
 struct VarScriptView : std::variant<valtype, Span<const uint8_t>> {
     using variant::variant; // inherit all c'tors
 
@@ -182,54 +188,129 @@ struct VarScriptView : std::variant<valtype, Span<const uint8_t>> {
     }
 };
 
-// Encapsulates a control frame. Needed to support OP_EVAL. Each control frame has its own conditional stack, script,
-// program counter, etc.
-struct ControlFrame {
-    const size_t cumulativeVfExecSize = 0;  ///< Cumulative vfExec.size() for all control frames below this.
-    const VarScriptView varScript;
+/**
+ *  Encapsulates an evaluation stack frame. Needed to support OP_EVAL. Each stack frame has its own conditional stack,
+ *  control stack, script, program counter, etc. All stack frames share the same data `stack` and `altstack`, however.
+ */
+struct EvalFrame {
+    const size_t cumulativeCtr = 0; ///< Cumulative vfExec.size() + loopDepthCtr for all control frames BELOW this one
+    const VarScriptView varScript;  ///< The script we are evaluating (by-value or as-a-view type)
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
-    const uint8_t *pc;              ///< Initially equal to varScript.begin(), but updated as we execute the script's code
+    const uint8_t *pc;              ///< Initially equal to varScript.begin(), but incremented as we execute the script
     const uint8_t *pbegincodehash;  ///< Initially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
-    ControlFrame(size_t cumSize, VarScriptView &&vscript)
-        : cumulativeVfExecSize(cumSize), varScript{std::move(vscript)}, pc{varScript.begin()}, pbegincodehash{pc} {}
+    /**
+     *  Control-flow stack. nullptr entries indicate most-recent control block we are inside of is an OP_IF;
+     *  non-nullptr indicates we are inside a loop (OP_BEGIN) and the value is a `pc` to jump to for looping.
+     */
+    std::vector<const uint8_t *> controlStack;
+    /**
+     * Indicates the nesting level of how deep we are inside of loops (OP_BEGIN/OP_UNTIL constructs).
+     * Gets incremented for every OP_BEGIN pushed, decremented for each OP_UNTIL popped.
+     */
+    size_t loopDepthCtr = 0;
+
+    EvalFrame(size_t cumCtr, VarScriptView &&vscript)
+        : cumulativeCtr(cumCtr), varScript{std::move(vscript)}, pc{varScript.begin()}, pbegincodehash{pc} {}
+
+    /// Returns non-nullptr if the innermost control flow structure is a loop (OP_BEGIN), nullptr otherwise.
+    [[nodiscard]] const uint8_t *controlStackTop() const {
+        return controlStack.empty() ? nullptr : controlStack.back();
+    }
+
+    void loopBeginPushPC() {
+        controlStack.push_back(pc);
+        ++loopDepthCtr;
+    }
+    void loopEndPopPC() {
+        if (controlStackTop()) {
+            --loopDepthCtr;
+            controlStack.pop_back();
+        }
+    }
+
+    void processIf(bool val) {
+        vfExec.push_back(val);
+        controlStack.push_back(nullptr);
+    }
+    [[nodiscard]] bool processEndIf(ScriptError *serror) {
+        if (vfExec.empty()) {
+            // No matching OP_IF/OP_NOTIF
+            return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
+        }
+        if (controlStackTop()) {
+            // Inner-most control block is OP_BEGIN, so OP_ENDIF makes no sense here
+            return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
+        }
+        if (!controlStack.empty()) {
+            // Pop the nullptr that is at the top of the controlStack (nullptr means we are in an IF-like block).
+            controlStack.pop_back();
+        }
+        vfExec.pop_back(); // tell the condition stack we popped out of this IF block
+        return true;
+    }
+    [[nodiscard]] bool processElse(ScriptError *serror) {
+        if (vfExec.empty()) {
+            // No matching OP_IF/OP_NOTIF
+            return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
+        }
+        if (controlStackTop()) {
+            // Inner-most control block is OP_BEGIN, so OP_ENDIF makes no sense here
+            return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
+        }
+        vfExec.toggle_top(); // tell the condition stack to invert its exec flag (to take or ignore the upcoming branch)
+        return true;
+    }
 };
 
-// The control stack used to support OP_EVAL. TODO: More description.
-class ControlStack {
-    std::list<ControlFrame> controlFrames; // NB: We use a list here for stable references to contained objects
+/**
+ *  The evaluation stack frames, used to support OP_EVAL. The initial frame is the base scriptSig, scriptPubKey, or
+ *  redeemScript that was passed-in to EvalScript(). Subsequent frames are any OP_EVAL sub-scripts we may have
+ *  encountered, which are pushed to the top of this stack as OP_EVAL's are executed.
+ *
+ *  After pushing a new sub-script to this stack, the current script is paused, with execution proceeding to the first
+ *  instruction of the newly pushed script. When the stack's top-most script ends, execution resumes where it left off
+ *  on the previous stack frame, and so on, until the EvalStack is empty after all scripts have completed successfully.
+ *
+ *  If any script or sub-script on the EvalStack fails (such as due to normal processing e.g. OP_VERIFY failure, or if
+ *  a script error occurs), the entire evaluation fails.
+ */
+class EvalStack {
+    std::list<EvalFrame> evalFrames; ///< NB: We use a list here to get stable references to contained objects
 
 public:
-    explicit ControlStack(const CScript *outermostScript) {
+    explicit EvalStack(const CScript *outermostScript) {
         assert(outermostScript != nullptr);
         pushFrame(Span{*outermostScript});
     }
 
-    ControlFrame &pushFrame(VarScriptView &&varScript) {
+    EvalFrame &pushFrame(VarScriptView &&varScript) {
         if (varScript.size() > MAX_SCRIPT_SIZE) {
-            throw ScriptEvaluationError(ScriptErrorString(ScriptError::SCRIPT_SIZE), ScriptError::SCRIPT_SIZE);
+            // Size check consensus rule (enforced here on push for belt-and-suspenders)
+            throw ScriptEvaluationError(ScriptError::SCRIPT_SIZE);
         }
-        return controlFrames.emplace_back(depth(true), std::move(varScript));
+        return evalFrames.emplace_back(depth(true), std::move(varScript));
     }
 
     void popFrame() {
-        if (controlFrames.empty()) throw std::out_of_range("popFrame: Control stack is empty");
-        controlFrames.pop_back();
+        if (evalFrames.empty()) throw std::out_of_range("popFrame: Evaluation stack is empty");
+        evalFrames.pop_back();
     }
 
     // Returns the depth of this stack. Note that if the stack has only 1 frame with an empty vfExec, 0 is returned.
     size_t depth(bool omitNumFrames = false) const {
-        if (controlFrames.empty()) return 0;
-        auto &top = controlFrames.back();
-        return top.cumulativeVfExecSize + top.vfExec.size() + (omitNumFrames ? 0 : controlFrames.size() - 1u);
+        if (evalFrames.empty()) return 0;
+        auto &top = evalFrames.back();
+        return top.cumulativeCtr + top.vfExec.size() + top.loopDepthCtr
+               + (omitNumFrames ? 0 : evalFrames.size() - 1u);
     }
 
-    ControlFrame &top() {
-        if (controlFrames.empty()) throw std::out_of_range("top: Control stack is empty");
-        return controlFrames.back();
+    EvalFrame &top() {
+        if (evalFrames.empty()) throw std::out_of_range("top: Evaluation stack is empty");
+        return evalFrames.back();
     }
 
-    bool empty() const {  return controlFrames.empty(); }
+    bool empty() const {  return evalFrames.empty(); }
 };
 
 template<bool UsesBigInt>
@@ -242,6 +323,10 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
     static auto const bnZero = ScriptNumType::fromIntUnchecked(0);
     static const valtype vchFalse(0);
     static const valtype vchTrue(1, 1);
+
+    if (initialScript.size() > MAX_SCRIPT_SIZE) {
+        return set_error(serror, ScriptError::SCRIPT_SIZE);
+    }
 
     std::vector<valtype> altstack;
     set_error(serror, ScriptError::UNKNOWN);
@@ -279,19 +364,17 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
     try {
         // Initial frame for the top-level script (zero copy, just takes the pointer).
-        // Note that we check if the script is <= MAX_SCRIPT_SIZE in the ControlStack c'tor, which may throw here.
-        ControlStack controlStack(&initialScript);
+        EvalStack evalStack(&initialScript);
 
         do {
-            ControlFrame &curFrame = controlStack.top();
+            EvalFrame &curFrame = evalStack.top();
             const uint8_t *&pc = curFrame.pc;
             const uint8_t *&pbegincodehash = curFrame.pbegincodehash;
             const uint8_t *const pend = curFrame.varScript.end();
-            ConditionStack &vfExec = curFrame.vfExec;
-            bool newControlFrameWasPushed = false;
+            bool newEvalFrameWasPushed = false;
 
-            while (pc < pend && !newControlFrameWasPushed) {
-                bool fExec = vfExec.all_true();
+            while (pc < pend && !newEvalFrameWasPushed) {
+                bool fExec = curFrame.vfExec.all_true();
 
                 //
                 // Read instruction
@@ -472,10 +555,10 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
                             }
 
-                            controlStack.pushFrame(std::move(stacktop(-1)));
+                            evalStack.pushFrame(std::move(stacktop(-1))); // MAX_SCRIPT_SIZE check done by pushFrame
                             popstack(stack);
-                            newControlFrameWasPushed = true;
-
+                            // Tell enclosing code to pause evaluating the current script; and begin this frame's script
+                            newEvalFrameWasPushed = true;
                         } break;
 
                         //
@@ -509,23 +592,54 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 }
                                 popstack(stack);
                             }
-                            vfExec.push_back(fValue);
+                            curFrame.processIf(fValue);
+                        } break;
+
+                        case OP_BEGIN: {
+                            if ( ! may2026Enabled) {
+                                return set_error(serror, ScriptError::BAD_OPCODE);
+                            }
+                            // unconditionally push program counter, even if !fExec, to keep track of proper control flow structures
+                            curFrame.loopBeginPushPC();
+                        } break;
+
+                        case OP_UNTIL: {
+                            if ( ! may2026Enabled) {
+                                return set_error(serror, ScriptError::BAD_OPCODE);
+                            }
+                            if ( ! curFrame.controlStackTop()) {
+                                // Innermost control block is not OP_BEGIN
+                                return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
+                            }
+                            bool fValue = true;
+                            if (fExec) {
+                                if (stack.empty()) {
+                                    return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                                }
+                                fValue = CastToBool(stacktop(-1));
+                                popstack(stack);
+                            }
+                            if ( ! fValue) {
+                                // This branch is only taken if fExec is true and if the test condition was false.
+                                // Update program counter to point to the instruciton after the enclosing OP_BEGIN.
+                                pc = curFrame.controlStackTop();
+                            } else {
+                                // Condition met or !fExec, pop the loop stack item previously pushed by OP_BEGIN.
+                                // Execution proceeds normally after OP_UNTIL instruction.
+                                curFrame.loopEndPopPC();
+                            }
                         } break;
 
                         case OP_ELSE: {
-                            if (vfExec.empty()) {
-                                return set_error(
-                                    serror, ScriptError::UNBALANCED_CONDITIONAL);
+                            if ( ! curFrame.processElse(serror) ) {
+                                return false; // serror was set by processElse
                             }
-                            vfExec.toggle_top();
                         } break;
 
                         case OP_ENDIF: {
-                            if (vfExec.empty()) {
-                                return set_error(
-                                    serror, ScriptError::UNBALANCED_CONDITIONAL);
+                            if ( ! curFrame.processEndIf(serror) ) {
+                                return false; // serror was set by processEndIf
                             }
-                            vfExec.pop_back();
                         } break;
 
                         case OP_VERIFY: {
@@ -1945,7 +2059,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                     }
 
                     // Conditional stack may not exceed depth of 100.
-                    if (!may2026Enabled && vfExec.size() > may2025::MAX_CONDITIONAL_STACK_DEPTH) {
+                    if (!may2026Enabled && curFrame.vfExec.size() > may2025::MAX_CONDITIONAL_STACK_DEPTH) {
                         return set_error(serror, ScriptError::CONDITIONAL_STACK_DEPTH);
                     }
                 }
@@ -1953,29 +2067,32 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                 // Enforce May 2026 rules
                 if (may2026Enabled) {
                     // Total control stack depth (cum. vfExec + num. OP_EVAL control stack frames) may not exceed 100.
-                    if (controlStack.depth() > may2026::MAX_CONTROL_STACK_DEPTH) {
+                    if (evalStack.depth() > may2026::MAX_CONTROL_STACK_DEPTH) {
                         return set_error(serror, ScriptError::CONTROL_STACK_DEPTH);
                     }
                 }
-            } // end while(pc < pend && !newControlFrameWasPushed)
+            } // end while(pc < pend && !newEvalFrameWasPushed)
 
-            if (newControlFrameWasPushed) {
-                assert(!controlStack.empty() && &controlStack.top() != &curFrame); // invariant must hold if we get here
+            if (newEvalFrameWasPushed) {
+                assert(!evalStack.empty() && &evalStack.top() != &curFrame); // invariant must hold if we get here
                 // jump to end of outer `do` loop
                 continue;
             }
 
-            // Either the top-most `initialScript` has an unbalanced conditional, or an OP_EVAL'd inner script does;
+            // Either the top-most `initialScript` has an unbalanced control flow, or an OP_EVAL'd inner script does;
             // this is disallowed.
-            if (!vfExec.empty()) {
+            if (!curFrame.vfExec.empty()) {
                 return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
+            }
+            if (!curFrame.controlStack.empty()) {
+                return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
             }
 
             // End of either `initialScript` or of an OP_EVAL'd inner script, pop this frame.
             // Note that this invalidates refs to: `curFrame`, `script`, `pc`, `pbegincodehash`, `pend`, `vfExec`
-            controlStack.popFrame();
+            evalStack.popFrame();
 
-        } while (!controlStack.empty()); // end outer do loop
+        } while (!evalStack.empty()); // end outer do loop
     } catch (const ScriptEvaluationError &e) {
         return set_error(serror, e.scriptError);
     } catch (...) {

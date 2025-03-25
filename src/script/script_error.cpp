@@ -63,6 +63,8 @@ const char *ScriptErrorString(const ScriptError serror) {
             return "OP_RETURN was encountered";
         case ScriptError::UNBALANCED_CONDITIONAL:
             return "Invalid OP_IF construction";
+        case ScriptError::UNBALANCED_CONTROL_FLOW:
+            return "Invalid control flow construction";
         case ScriptError::DIV_BY_ZERO:
             return "Division by zero error";
         case ScriptError::MOD_BY_ZERO:

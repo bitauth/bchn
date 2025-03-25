@@ -79,7 +79,8 @@ static ScriptErrorDesc script_errors[] = {
     {ScriptError::DISABLED_OPCODE, "DISABLED_OPCODE"},
     {ScriptError::INVALID_STACK_OPERATION, "INVALID_STACK_OPERATION"},
     {ScriptError::INVALID_ALTSTACK_OPERATION, "INVALID_ALTSTACK_OPERATION"},
-    {ScriptError::UNBALANCED_CONDITIONAL, "UNBALANCED_CONDITIONAL"},
+    {ScriptError::UNBALANCED_CONDITIONAL,"UNBALANCED_CONDITIONAL"},
+    {ScriptError::UNBALANCED_CONTROL_FLOW, "UNBALANCED_CONTROL_FLOW"},
     {ScriptError::NEGATIVE_LOCKTIME, "NEGATIVE_LOCKTIME"},
     {ScriptError::UNSATISFIED_LOCKTIME, "UNSATISFIED_LOCKTIME"},
     {ScriptError::SIG_HASHTYPE, "SIG_HASHTYPE"},
@@ -104,6 +105,7 @@ static ScriptErrorDesc script_errors[] = {
     {ScriptError::OP_COST, "OP_COST"},
     {ScriptError::TOO_MANY_HASH_ITERS, "HASH_ITERS"},
     {ScriptError::CONDITIONAL_STACK_DEPTH, "CONDITIONAL_STACK_DEPTH"},
+    {ScriptError::CONTROL_STACK_DEPTH, "CONTROL_STACK_DEPTH"},
 };
 
 static const char *FormatScriptError(ScriptError err) {
