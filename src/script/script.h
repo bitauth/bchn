@@ -63,8 +63,10 @@ enum opcodetype {
     OP_EVAL = 0x62,      // after upgrade12 (May 2026)
     OP_IF = 0x63,
     OP_NOTIF = 0x64,
-    OP_VERIF = 0x65,
-    OP_VERNOTIF = 0x66,
+    /* OP_VERIF = 0x65, */    // Historical (early Bitcoin)
+    /* OP_VERNOTIF = 0x66, */ // Historical (early Bitcoin)
+    OP_BEGIN = 0x65,          // after upgrade12 (May 2026)
+    OP_UNTIL = 0x66,          // after upgrade12 (May 2026)
     OP_ELSE = 0x67,
     OP_ENDIF = 0x68,
     OP_VERIFY = 0x69,
@@ -231,6 +233,7 @@ struct ScriptEvaluationError : std::runtime_error {
     ScriptError scriptError;
     explicit ScriptEvaluationError(const std::string &str, ScriptError err = ScriptError::UNKNOWN)
         : std::runtime_error(str), scriptError(err) {}
+    explicit ScriptEvaluationError(ScriptError err) : ScriptEvaluationError(ScriptErrorString(err), err) {}
 };
 
 // Subclass of above, used in the ScriptNum classes below to indicate encoding, overflow, or other script num error.

@@ -90,7 +90,7 @@ static void RandomScript(CScript &script) {
     static const opcodetype oplist[] = {
         OP_FALSE, OP_1,        OP_2,
         OP_3,     OP_CHECKSIG, OP_IF,
-        OP_VERIF, OP_RETURN,   OP_CODESEPARATOR};
+        OP_BEGIN, OP_RETURN,   OP_CODESEPARATOR};
     script = CScript();
     int ops = (InsecureRandRange(10));
     for (int i = 0; i < ops; i++) {
