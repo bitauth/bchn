@@ -169,7 +169,7 @@ public:
 };
 
 /// Either a byte blob from the stack that we own (for OP_EVAL support), or a Span as a view into top-level script.
-struct VarScriptOrPtr : std::variant<valtype, Span<const uint8_t>> {
+struct VarScriptView : std::variant<valtype, Span<const uint8_t>> {
     using variant::variant; // inherit all c'tors
 
     const uint8_t *begin() const {
@@ -186,12 +186,12 @@ struct VarScriptOrPtr : std::variant<valtype, Span<const uint8_t>> {
 // program counter, etc.
 struct ControlFrame {
     const size_t cumulativeVfExecSize = 0;  ///< Cumulative vfExec.size() for all control frames below this.
-    const VarScriptOrPtr varScript;
+    const VarScriptView varScript;
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
     const uint8_t *pc;              ///< Initially equal to varScript.begin(), but updated as we execute the script's code
-    const uint8_t *pbegincodehash;  ///< Ititially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
+    const uint8_t *pbegincodehash;  ///< Initially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
-    ControlFrame(size_t cumSize, VarScriptOrPtr &&vscript)
+    ControlFrame(size_t cumSize, VarScriptView &&vscript)
         : cumulativeVfExecSize(cumSize), varScript{std::move(vscript)}, pc{varScript.begin()}, pbegincodehash{pc} {}
 };
 
@@ -205,7 +205,7 @@ public:
         pushFrame(Span{*outermostScript});
     }
 
-    ControlFrame &pushFrame(VarScriptOrPtr &&varScript) {
+    ControlFrame &pushFrame(VarScriptView &&varScript) {
         if (varScript.size() > MAX_SCRIPT_SIZE) {
             throw ScriptEvaluationError(ScriptErrorString(ScriptError::SCRIPT_SIZE), ScriptError::SCRIPT_SIZE);
         }
