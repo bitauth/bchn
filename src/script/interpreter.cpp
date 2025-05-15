@@ -38,7 +38,7 @@ bool CastToBool(const valtype &vch) {
 
 /**
  * Script is a stack machine (like Forth) that evaluates a predicate
- * returning a bool indicating valid or not.  There are no loops.
+ * returning a bool indicating valid or not.
  */
 #define stacktop(i) (stack.at(stack.size() + (i)))
 #define altstacktop(i) (altstack.at(altstack.size() + (i)))
