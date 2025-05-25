@@ -69,10 +69,10 @@ bool CheckTokenData(const uint32_t scriptFlags, const token::OutputDataPtr &pdat
         }
         return true; // since this is a pure FT, the below check is not done (they are only for NFT)
     }
-    const size_t maxCommitmentLenth = scriptFlags & SCRIPT_ENABLE_MAY2026
-                                          ? token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12
-                                          : token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9;
-    if (commitment.size() > maxCommitmentLenth) {
+    const size_t maxCommitmentLength = scriptFlags & SCRIPT_ENABLE_MAY2026
+                                           ? token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE12
+                                           : token::MAX_CONSENSUS_COMMITMENT_LENGTH_UPGRADE9;
+    if (commitment.size() > maxCommitmentLength) {
         // token has oversized commitment
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-token-commitment-oversized", false,
                          strprintf("%s: token %s has nft commitment that is oversized %d",
