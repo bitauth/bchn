@@ -63,8 +63,8 @@ const char *GetOpName(opcodetype opcode) {
         // control
         case OP_NOP:
             return "OP_NOP";
-        case OP_EVAL:
-            return "OP_EVAL";
+        case OP_VER:
+            return "OP_VER";
         case OP_IF:
             return "OP_IF";
         case OP_NOTIF:
@@ -147,10 +147,12 @@ const char *GetOpName(opcodetype opcode) {
             return "OP_EQUAL";
         case OP_EQUALVERIFY:
             return "OP_EQUALVERIFY";
-        case OP_RESERVED1:
-            return "OP_RESERVED1";
-        case OP_RESERVED2:
-            return "OP_RESERVED2";
+
+        // functions
+        case OP_DEFINE:
+            return "OP_DEFINE";
+        case OP_INVOKE:
+            return "OP_INVOKE";
 
         // numeric
         case OP_1ADD:
@@ -507,6 +509,7 @@ bool GetScriptOp(It &pc, It end, opcodetype &opcodeRet, std::vector<uint8_t> *pv
     return true;
 }
 
+// explicit template instantiations
 template bool GetScriptOp(CScriptBase::const_iterator &, CScriptBase::const_iterator, opcodetype &, std::vector<uint8_t> *);
 template bool GetScriptOp(const uint8_t * &, const uint8_t *, opcodetype &, std::vector<uint8_t> *);
 

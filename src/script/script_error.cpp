@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -136,6 +136,12 @@ const char *ScriptErrorString(const ScriptError serror) {
         // Upgrade 12
         case ScriptError::CONTROL_STACK_DEPTH:
             return "Control stack depth limit exceeded";
+        case ScriptError::INVALID_FUNCTION_IDENTIFIER:
+            return "Function identifier is not within the valid range [0, 999]";
+        case ScriptError::FUNCTION_OVERWRITE_DISALLOWED:
+            return "Redefinition of an existing function with the same identifier is disallowed";
+        case ScriptError::INVOKED_UNDEFINED_FUNCTION:
+            return "Attempted to invoke an undefined function";
 
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:

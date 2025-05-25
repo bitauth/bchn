@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -21,7 +21,7 @@
 #include <util/bitmanip.h>
 
 #include <list>
-#include <variant>
+#include <map>
 
 bool CastToBool(const valtype &vch) {
     for (size_t i = 0; i < vch.size(); i++) {
@@ -169,32 +169,14 @@ public:
 };
 
 /**
- *  Encapsulates either a script byte blob (value type) owned by this instance, or a "view" into an existing script
- *  byte blob (view type) that is owned by some other object with a longer lifetime than this instance.
- *
- *  This type is necessary for OP_EVAL support in order to be able to efficiently handle both stack-data-as-scripts
- *  (std::vector) and CScript in a uniform way.
- */
-struct VarScriptView : std::variant<valtype, Span<const uint8_t>> {
-    using variant::variant; // inherit all c'tors
-
-    const uint8_t *begin() const {
-        return std::visit([](const Span<const uint8_t> &s) { return s.data(); }, *this); // lambda matches both variants
-    }
-    const uint8_t *end() const { return begin() + size(); }
-
-    size_t size() const {
-        return std::visit([](const Span<const uint8_t> &s) { return s.size(); }, *this); // lambda matches both variants
-    }
-};
-
-/**
- *  Encapsulates an evaluation stack frame. Needed to support OP_EVAL. Each stack frame has its own conditional stack,
- *  control stack, script, program counter, etc. All stack frames share the same data `stack` and `altstack`, however.
+ *  Encapsulates an evaluation stack frame. Needed to support OP_INVOKE. Each stack frame has its own conditional
+ *  stack, control stack, script, program counter, etc. All stack frames share the same data `stack`, `altstack`, and
+ *  function table, however.
  */
 struct EvalFrame {
     const size_t cumulativeCtr = 0; ///< Cumulative vfExec.size() + loopDepthCtr for all control frames BELOW this one
-    const VarScriptView varScript;  ///< The script we are evaluating (by-value or as-a-view type)
+    using ScriptView = Span<const uint8_t>;
+    const ScriptView script;        ///< The script we are evaluating (as a view type)
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
     const uint8_t *pc;              ///< Initially equal to varScript.begin(), but incremented as we execute the script
     const uint8_t *pbegincodehash;  ///< Initially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
@@ -210,8 +192,8 @@ struct EvalFrame {
      */
     size_t loopDepthCtr = 0;
 
-    EvalFrame(size_t cumCtr, VarScriptView &&vscript)
-        : cumulativeCtr(cumCtr), varScript{std::move(vscript)}, pc{varScript.begin()}, pbegincodehash{pc} {}
+    EvalFrame(size_t cumCtr, const ScriptView &scriptView)
+        : cumulativeCtr(cumCtr), script{scriptView}, pc{script.begin()}, pbegincodehash{pc} {}
 
     /// Returns non-nullptr if the innermost control flow structure is a loop (OP_BEGIN), nullptr otherwise.
     [[nodiscard]] const uint8_t *controlStackTop() const {
@@ -264,9 +246,9 @@ struct EvalFrame {
 };
 
 /**
- *  The evaluation stack frames, used to support OP_EVAL. The initial frame is the base scriptSig, scriptPubKey, or
- *  redeemScript that was passed-in to EvalScript(). Subsequent frames are any OP_EVAL sub-scripts we may have
- *  encountered, which are pushed to the top of this stack as OP_EVAL's are executed.
+ *  The evaluation stack frames, used to support OP_INVOKE. The initial frame is the base scriptSig, scriptPubKey, or
+ *  redeemScript that was passed-in to EvalScript(). Subsequent frames are any OP_DEFINE'd sub-scripts we may have
+ *  encountered, which are pushed to the top of this stack as OP_INVOKE op-codes are executed.
  *
  *  After pushing a new sub-script to this stack, the current script is paused, with execution proceeding to the first
  *  instruction of the newly pushed script. When the stack's top-most script ends, execution resumes where it left off
@@ -281,15 +263,15 @@ class EvalStack {
 public:
     explicit EvalStack(const CScript *outermostScript) {
         assert(outermostScript != nullptr);
-        pushFrame(Span{*outermostScript});
+        pushFrame(*outermostScript);
     }
 
-    EvalFrame &pushFrame(VarScriptView &&varScript) {
-        if (varScript.size() > MAX_SCRIPT_SIZE) {
+    void pushFrame(const EvalFrame::ScriptView &script) {
+        if (script.size() > MAX_SCRIPT_SIZE) {
             // Size check consensus rule (enforced here on push for belt-and-suspenders)
             throw ScriptEvaluationError(ScriptError::SCRIPT_SIZE);
         }
-        return evalFrames.emplace_back(depth(true), std::move(varScript));
+        evalFrames.emplace_back(depth(true), script);
     }
 
     void popFrame() {
@@ -328,6 +310,12 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
         return set_error(serror, ScriptError::SCRIPT_SIZE);
     }
 
+    // Function table (OP_DEFINE/OP_INVOKE support)
+    using FunctionTable = std::map<uint16_t, const valtype>;
+    static_assert(may2026::MAX_FUNCTION_IDENTIFIER <= static_cast<uint64_t>(std::numeric_limits<FunctionTable::key_type>::max()),
+                  "FunctionTable::key_type must be large enough to support the max function identifier");
+    FunctionTable functionTable;
+
     std::vector<valtype> altstack;
     set_error(serror, ScriptError::UNKNOWN);
     int nOpCount = 0; /* Only used iff chipVmLimitsEnabled == false */
@@ -363,14 +351,14 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
     bool const may2026Enabled = (flags & SCRIPT_ENABLE_MAY2026) != 0;
 
     try {
-        // Initial frame for the top-level script (zero copy, just takes the pointer).
+        // Initial frame for the top-level script (zero-copy view)
         EvalStack evalStack(&initialScript);
 
         do {
             EvalFrame &curFrame = evalStack.top();
             const uint8_t *&pc = curFrame.pc;
             const uint8_t *&pbegincodehash = curFrame.pbegincodehash;
-            const uint8_t *const pend = curFrame.varScript.end();
+            const uint8_t *const pend = curFrame.script.end();
             bool newEvalFrameWasPushed = false;
 
             while (pc < pend && !newEvalFrameWasPushed) {
@@ -547,9 +535,47 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                         } break;
 
                         //
-                        // Control
+                        // Functions
                         //
-                        case OP_EVAL: {
+                        case OP_DEFINE: {
+                            // <function-code> <function-id>
+                            if (!may2026Enabled) {
+                                // Upgrade 12 not yet activated, treat as bad opcode.
+                                return set_error(serror, ScriptError::BAD_OPCODE);
+                            }
+                            if (stack.size() < 2) {
+                                return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                            }
+
+                            const int64_t funcId = CScriptNum(stacktop(-1), true, maxIntegerSizeLegacy).getint64();
+                            if (funcId < 0 || funcId > static_cast<int64_t>(may2026::MAX_FUNCTION_IDENTIFIER)) {
+                                return set_error(serror, ScriptError::INVALID_FUNCTION_IDENTIFIER);
+                            }
+
+                            auto &funcCode = stacktop(-2);
+                            if (funcCode.size() > MAX_SCRIPT_SIZE) {
+                                // belt-and-suspenders check -- should never happen in production code
+                                return set_error(serror, ScriptError::SCRIPT_SIZE);
+                            }
+
+                            const auto & [it, inserted] =
+                                functionTable.try_emplace(static_cast<FunctionTable::key_type>(funcId),
+                                                          std::move(funcCode));
+
+                            if ( ! inserted) {
+                                // overwriting existing functions is disallowed
+                                return set_error(serror, ScriptError::FUNCTION_OVERWRITE_DISALLOWED);
+                            }
+
+                            // consume args
+                            popstack(stack);
+                            popstack(stack);
+                            // tally additional op cost: byte size of the function's code
+                            metrics.TallyPushOp(it->second.size());
+                        } break;
+
+                        case OP_INVOKE: {
+                            // <function-id>
                             if (!may2026Enabled) {
                                 // Upgrade 12 not yet activated, treat as bad opcode.
                                 return set_error(serror, ScriptError::BAD_OPCODE);
@@ -558,12 +584,25 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
                             }
 
-                            evalStack.pushFrame(std::move(stacktop(-1))); // MAX_SCRIPT_SIZE check done by pushFrame
+                            const int64_t funcId = CScriptNum(stacktop(-1), true, maxIntegerSizeLegacy).getint64();
+                            if (funcId < 0 || funcId > static_cast<int64_t>(may2026::MAX_FUNCTION_IDENTIFIER)) {
+                                return set_error(serror, ScriptError::INVALID_FUNCTION_IDENTIFIER);
+                            }
+
+                            const auto it = functionTable.find(static_cast<FunctionTable::key_type>(funcId));
+                            if (it == functionTable.end()) {
+                                return set_error(serror, ScriptError::INVOKED_UNDEFINED_FUNCTION);
+                            }
+
                             popstack(stack);
+                            evalStack.pushFrame(it->second); // MAX_SCRIPT_SIZE check done by pushFrame
                             // Tell enclosing code to pause evaluating the current script; and begin this frame's script
                             newEvalFrameWasPushed = true;
                         } break;
 
+                        //
+                        // Control
+                        //
                         case OP_IF:
                         case OP_NOTIF: {
                             // <expression> if [statements] [else [statements]]
@@ -2043,7 +2082,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                 } // end if (vfExec)
 
                 // Size limits
-                if (stack.size() + altstack.size() > MAX_STACK_SIZE) {
+                if (stack.size() + altstack.size() + functionTable.size() > MAX_STACK_SIZE) {
                     return set_error(serror, ScriptError::STACK_SIZE);
                 }
 
@@ -2067,7 +2106,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
                 // Enforce May 2026 rules
                 if (may2026Enabled) {
-                    // Total control stack depth (cum. vfExec + num. OP_EVAL control stack frames) may not exceed 100.
+                    // Total control stack depth (cum. vfExec + num. OP_INVOKE control stack frames) may not exceed 100.
                     if (evalStack.depth() > may2026::MAX_CONTROL_STACK_DEPTH) {
                         return set_error(serror, ScriptError::CONTROL_STACK_DEPTH);
                     }
@@ -2080,7 +2119,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                 continue;
             }
 
-            // Either the top-most `initialScript` has an unbalanced control flow, or an OP_EVAL'd inner script does;
+            // Either the top-most `initialScript` has an unbalanced control flow, or an OP_INVOKE'd inner script does;
             // this is disallowed.
             if (!curFrame.vfExec.empty()) {
                 return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
@@ -2089,7 +2128,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                 return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
             }
 
-            // End of either `initialScript` or of an OP_EVAL'd inner script, pop this frame.
+            // End of either `initialScript` or of an OP_INVOKE'd inner script, pop this frame.
             // Note that this invalidates refs to: `curFrame`, `pc`, `pbegincodehash`, `pend`
             evalStack.popFrame();
 

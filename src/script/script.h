@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -59,8 +59,7 @@ enum opcodetype {
 
     // control
     OP_NOP = 0x61,
-    /* OP_VER = 0x62, */ // Historical (early Bitcoin)
-    OP_EVAL = 0x62,      // after upgrade12 (May 2026)
+    OP_VER = 0x62,            // Historical (early Bitcoin)
     OP_IF = 0x63,
     OP_NOTIF = 0x64,
     /* OP_VERIF = 0x65, */    // Historical (early Bitcoin)
@@ -107,8 +106,10 @@ enum opcodetype {
     OP_XOR = 0x86,
     OP_EQUAL = 0x87,
     OP_EQUALVERIFY = 0x88,
-    OP_RESERVED1 = 0x89,
-    OP_RESERVED2 = 0x8a,
+
+    // function support
+    OP_DEFINE = 0x89, // after upgrade12 (May 2026), was: OP_RESERVED1
+    OP_INVOKE = 0x8a, // after upgrade12 (May 2026), was: OP_RESERVED2
 
     // numeric
     OP_1ADD = 0x8b,

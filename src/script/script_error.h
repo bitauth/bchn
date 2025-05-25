@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -101,6 +101,11 @@ enum class ScriptError {
 
     /* Control stack depth */
     CONTROL_STACK_DEPTH,
+
+    /* Function definition/invocation errors */
+    INVALID_FUNCTION_IDENTIFIER,
+    FUNCTION_OVERWRITE_DISALLOWED,
+    INVOKED_UNDEFINED_FUNCTION,
 
     ERROR_COUNT,
 };
