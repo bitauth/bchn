@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -166,7 +166,8 @@ static void DoTest(const CScript &scriptPubKey, const CScript &scriptSig,
         // anything about what happens when they are flipped. Keep them as-is.
         extra_flags &=
             ~(SCRIPT_ENABLE_SIGHASH_FORKID | SCRIPT_ENABLE_SCHNORR_MULTISIG | SCRIPT_64_BIT_INTEGERS
-              | SCRIPT_NATIVE_INTROSPECTION | SCRIPT_ENABLE_TOKENS | SCRIPT_ENABLE_P2SH_32 | SCRIPT_ENABLE_MAY2025);
+              | SCRIPT_NATIVE_INTROSPECTION | SCRIPT_ENABLE_TOKENS | SCRIPT_ENABLE_P2SH_32 | SCRIPT_ENABLE_MAY2025
+              | SCRIPT_ENABLE_MAY2026);
         uint32_t combined_flags =
             expect ? (flags & ~extra_flags) : (flags | extra_flags);
         // Weed out invalid flag combinations.
