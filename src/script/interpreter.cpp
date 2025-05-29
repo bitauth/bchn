@@ -1005,37 +1005,40 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                             // This branch is never taken outside of tests.
                             return set_error(serror, ScriptError::UNKNOWN);
                         } else {
+                            static_assert(static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
+                                              > std::max(CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT,
+                                                         ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT) * 8u,
+                                          "Assumption is a 32-bit int can hold more than the bit size of a script number");
                             int32_t const nbits = CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32();
-                            size_t const origSize = stacktop(-2).size();
 
                             // ensure bit-count is not negative and is constrained by the bit-length of our numbers
                             if (nbits < 0 || static_cast<size_t>(nbits) > maxIntegerSize * 8u) {
                                 return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
                             }
-                            if (nbits == 0) {
-                                // if nbits == 0, this is basically a no-op, but is costed "as if" it did some work
-                                popstack(stack);
+
+                            size_t const origSize = stacktop(-2).size();
+                            ScriptBigInt num(stacktop(-2), fRequireMinimal, maxIntegerSize);
+
+                            popstack(stack);
+                            popstack(stack);
+
+                            if (opcode == OP_LSHIFTNUM) {
+                                // operator<<= is arithmetic lshift, r = a * 2^b
+                                num.getMutableBigInt().operator<<=(nbits);
                             } else {
-                                // otherwise do the bit-shifts
-                                ScriptBigInt num(stacktop(-2), fRequireMinimal, maxIntegerSize);
-                                if (opcode == OP_LSHIFTNUM) {
-                                    // operator<<= is arithmetic lshift, r = a * 2^b
-                                    num.getMutableBigInt().operator<<=(nbits);
-                                } else {
-                                    // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
-                                    num.getMutableBigInt().operator>>=(nbits);
-                                }
-                                popstack(stack);
-                                popstack(stack);
-                                valtype vch = num.getvch();
-                                // Ensure result fits on stack & push result
-                                if (vch.size() > maxScriptElementSize) {
-                                    return set_error(serror, invalidNumberRangeError);
-                                }
-                                stack.push_back(std::move(vch));
+                                // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
+                                num.getMutableBigInt().operator>>=(nbits);
                             }
-                            // TODO (calin): Talk to Jason about this costing, right now it's the larger of: input size, output size
-                            metrics.TallyPushOp(std::max(origSize, stack.back().size()));
+
+                            valtype vch = num.getvch();
+                            // Ensure result fits on stack & push result
+                            if (vch.size() > maxScriptElementSize) {
+                                return set_error(serror, invalidNumberRangeError);
+                            }
+                            stack.push_back(std::move(vch));
+
+                            // TODO (calin): Talk to Jason about this costing, right now it's: input size + output size
+                            metrics.TallyPushOp(origSize + stack.back().size());
                         }
                     } break;
 
@@ -1540,6 +1543,43 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                         if ( ! ScriptNumType::IsMinimallyEncoded(n, maxIntegerSize)) {
                             return set_error(serror, invalidNumberRangeError);
                         }
+                    } break;
+
+                    case OP_LSHIFTBIN:
+                    case OP_RSHIFTBIN: {
+                        // (in nbits -- out)
+                        // Left (or right) shift of an arbitrary byte-blob as if it were a big in.size()-bit word,
+                        // padding with 0 bits at the rightmost (or leftmost) end.
+                        if (stack.size() < 2) {
+                            return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        static_assert(static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
+                                          > std::max(MAX_SCRIPT_ELEMENT_SIZE_LEGACY, may2025::MAX_SCRIPT_ELEMENT_SIZE) * 8u,
+                                      "Assumption is a 32-bit int can hold more than the bit size of a data push");
+                        int32_t const nbits = CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32();
+                        // ensure bit-count is not negative and is constrained by the length of the stack element size
+                        if (nbits < 0 || static_cast<size_t>(nbits) > maxScriptElementSize * 8u) {
+                            return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
+                        }
+                        valtype data = std::move(stacktop(-2));
+
+                        popstack(stack);
+                        popstack(stack);
+
+                        if (opcode == OP_LSHIFTBIN) {
+                            leftShiftBlob(data, nbits);
+                        } else {
+                            rightShiftBlob(data, nbits);
+                        }
+
+                        // Ensure result fits on stack & push result
+                        if (data.size() > maxScriptElementSize) {
+                            return set_error(serror, ScriptError::PUSH_SIZE);
+                        }
+                        stack.push_back(std::move(data));
+
+                        // TODO (calin): Talk to Jason about this costing, right now it's just 2x the blob size
+                        metrics.TallyPushOp(2u * stack.back().size());
                     } break;
 
 
