@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -97,7 +97,7 @@ enum opcodetype {
     OP_SIZE = 0x82,
 
     // bit logic
-    OP_INVERT = 0x83,
+    OP_INVERT = 0x83, // after upgrade12 (May 2026); Existed in early Bitcoin before being disabled.
     OP_AND = 0x84,
     OP_OR = 0x85,
     OP_XOR = 0x86,
@@ -109,8 +109,10 @@ enum opcodetype {
     // numeric
     OP_1ADD = 0x8b,
     OP_1SUB = 0x8c,
-    OP_2MUL = 0x8d,
-    OP_2DIV = 0x8e,
+    /* OP_2MUL = 0x8d, */ // Historical (early Bitcoin)
+    /* OP_2DIV = 0x8e, */ // Historical (early Bitcoin)
+    OP_LSHIFTNUM = 0x8d, // after upgrade12 (May 2026); arithmetic left-shift, defined as in C++20
+    OP_RSHIFTNUM = 0x8e, // after upgrade12 (May 2026); arithmetic right-shift, defined as in C++20
     OP_NEGATE = 0x8f,
     OP_ABS = 0x90,
     OP_NOT = 0x91,
@@ -121,8 +123,10 @@ enum opcodetype {
     OP_MUL = 0x95,
     OP_DIV = 0x96,
     OP_MOD = 0x97,
-    OP_LSHIFT = 0x98,
-    OP_RSHIFT = 0x99,
+    /* OP_LSHIFT = 0x98, */ // Historical (early Bitcoin)
+    /* OP_RSHIFT = 0x99, */ // Historical (early Bitcoin)
+    OP_LSHIFTBIN = 0x98, // after upgrade12 (May 2026); binary blob left-shift (non-arithmetic)
+    OP_RSHIFTBIN= 0x99, // after upgrade12 (May 2026); binary blob right-shift (non-arithmetic)
 
     OP_BOOLAND = 0x9a,
     OP_BOOLOR = 0x9b,
@@ -691,6 +695,7 @@ public:
     /// Returns the underlying BigInt; the returned BigInt is not guaranteed to be in valid consensus-legal range
     /// for pushing to the stack (a situation which may occur in tests).
     const BigInt &getBigInt() const { return value_; }
+    BigInt &getMutableBigInt() { return value_; }
 
     // Promote these base class static protected methods to public (for tests, etc).
     using ScriptIntBase::validBigIntRange;

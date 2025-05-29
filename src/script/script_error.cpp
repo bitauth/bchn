@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -130,6 +130,10 @@ const char *ScriptErrorString(const ScriptError serror) {
         // Big integer errors
         case ScriptError::INVALID_NUMBER_RANGE_BIG_INT:
             return "Given operand is not a number within the valid range [-2^79,999 + 1, 2^79,999 - 1]";
+
+        // Bit-shift errors
+        case ScriptError::INVALID_BIT_SHIFT:
+            return "Given bit shift amount is not a number within the valid range [0, 80,000]";
 
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:

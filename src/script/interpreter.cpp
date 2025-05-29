@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -86,12 +86,12 @@ static void CleanupScriptCode(CScript &scriptCode,
 static bool IsOpcodeDisabled(opcodetype opcode, uint32_t flags) {
     switch (opcode) {
         case OP_INVERT:
-        case OP_2MUL:
-        case OP_2DIV:
-        case OP_LSHIFT:
-        case OP_RSHIFT:
-            // Disabled opcodes.
-            return true;
+        case OP_LSHIFTNUM:
+        case OP_RSHIFTNUM:
+        case OP_LSHIFTBIN:
+        case OP_RSHIFTBIN:
+            // Disabled before May 2026
+            return (flags & SCRIPT_ENABLE_MAY2026) == 0;
         case OP_MUL:
             return (flags & SCRIPT_64_BIT_INTEGERS) == 0;
         default:
@@ -736,6 +736,19 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                         popstack(stack);
                     } break;
 
+                    case OP_INVERT: {
+                        // bitwise inverts all bytes (non-numeric operand and result)
+                        // (x1 -> ~x1)
+                        if (stack.size() < 1) {
+                            return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        valtype &data = stacktop(-1);
+                        for (uint8_t &ch : data) {
+                            ch = ~ch;
+                        }
+                        metrics.TallyPushOp(data.size());
+                    } break;
+
                     case OP_EQUAL:
                     case OP_EQUALVERIFY:
                         // case OP_NOTEQUAL: // use OP_NUMNOTEQUAL
@@ -972,6 +985,57 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                             } else {
                                 return set_error(serror, ScriptError::NUMEQUALVERIFY);
                             }
+                        }
+                    } break;
+
+                    case OP_LSHIFTNUM:
+                    case OP_RSHIFTNUM: {
+                        // (num nbits -- out)
+                        // LSHIFTNUM is an arithmetic 2's complement left-shift,  defined as: out = num * 2^nbits
+                        // RSHIFTNUM is an arithmetic 2's complement right-shift, defined as: out = num / 2^nbits
+                        // Rounding is always done towards negative infinity, like in C++20 operators << & >>, so e.g.:
+                        //     `-1 >> 1 == -1`, but `1 >> 1 == 0`.
+                        if (stack.size() < 2) {
+                            return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        // Note, we don't support this operation before arbitrary precision arithmetic activated.
+                        // Also note that these op-codes are marked "disabled" by IsOpcodeDisabled() before May 2026,
+                        // since the op-code values corresponded to historical OP_2MUL/OP_2DIV (disabled by Satoshi).
+                        if constexpr (!UsesBigInt) {
+                            // This branch is never taken outside of tests.
+                            return set_error(serror, ScriptError::UNKNOWN);
+                        } else {
+                            int32_t const nbits = CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32();
+                            size_t const origSize = stacktop(-2).size();
+
+                            // ensure bit-count is not negative and is constrained by the bit-length of our numbers
+                            if (nbits < 0 || static_cast<size_t>(nbits) > maxIntegerSize * 8u) {
+                                return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
+                            }
+                            if (nbits == 0) {
+                                // if nbits == 0, this is basically a no-op, but is costed "as if" it did some work
+                                popstack(stack);
+                            } else {
+                                // otherwise do the bit-shifts
+                                ScriptBigInt num(stacktop(-2), fRequireMinimal, maxIntegerSize);
+                                if (opcode == OP_LSHIFTNUM) {
+                                    // operator<<= is arithmetic lshift, r = a * 2^b
+                                    num.getMutableBigInt().operator<<=(nbits);
+                                } else {
+                                    // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
+                                    num.getMutableBigInt().operator>>=(nbits);
+                                }
+                                popstack(stack);
+                                popstack(stack);
+                                valtype vch = num.getvch();
+                                // Ensure result fits on stack & push result
+                                if (vch.size() > maxScriptElementSize) {
+                                    return set_error(serror, invalidNumberRangeError);
+                                }
+                                stack.push_back(std::move(vch));
+                            }
+                            // TODO (calin): Talk to Jason about this costing, right now it's the larger of: input size, output size
+                            metrics.TallyPushOp(std::max(origSize, stack.back().size()));
                         }
                     } break;
 
