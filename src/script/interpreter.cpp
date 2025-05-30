@@ -1019,23 +1019,26 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                             size_t const origSize = stacktop(-2).size();
                             ScriptBigInt num(stacktop(-2), fRequireMinimal, maxIntegerSize);
 
-                            popstack(stack);
-                            popstack(stack);
+                            popstack(stack); // consume nbits
 
-                            if (opcode == OP_LSHIFTNUM) {
-                                // operator<<= is arithmetic lshift, r = a * 2^b
-                                num.getMutableBigInt().operator<<=(nbits);
-                            } else {
-                                // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
-                                num.getMutableBigInt().operator>>=(nbits);
-                            }
+                            if (nbits != 0) { // if nbits == 0 the number already on the stack can remain, saving cycles
+                                popstack(stack); // consume numeric argument
 
-                            valtype vch = num.getvch();
-                            // Ensure result fits on stack & push result
-                            if (vch.size() > maxScriptElementSize) {
-                                return set_error(serror, invalidNumberRangeError);
+                                if (opcode == OP_LSHIFTNUM) {
+                                    // operator<<= is arithmetic lshift, r = a * 2^b
+                                    num.getMutableBigInt().operator<<=(nbits);
+                                } else {
+                                    // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
+                                    num.getMutableBigInt().operator>>=(nbits);
+                                }
+
+                                valtype vch = num.getvch();
+                                // Ensure result fits on stack & push result
+                                if (vch.size() > maxScriptElementSize) {
+                                    return set_error(serror, invalidNumberRangeError);
+                                }
+                                stack.push_back(std::move(vch));
                             }
-                            stack.push_back(std::move(vch));
 
                             // TODO (calin): Talk to Jason about this costing, right now it's: input size + output size
                             metrics.TallyPushOp(origSize + stack.back().size());
