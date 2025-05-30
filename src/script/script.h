@@ -710,11 +710,11 @@ public:
 
     /// Performs operator<<= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
     [[nodiscard]]
-    bool checkedLeftShift(int const bitcount) { return validBigIntRange(value_.operator<<=(bitcount)); }
+    bool checkedLeftShift(unsigned long bitcount) { return validBigIntRange(value_.operator<<=(bitcount)); }
 
     /// Performs operator>>= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
     [[nodiscard]]
-    bool checkedRightShift(int const bitcount) { return validBigIntRange(value_.operator>>=(bitcount)); }
+    bool checkedRightShift(unsigned long bitcount) { return validBigIntRange(value_.operator>>=(bitcount)); }
 
 private:
     // Called by ScriptNumCommon::fromBytes

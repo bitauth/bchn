@@ -566,12 +566,12 @@ BigInt &BigInt::operator^=(const BigInt &o) {
 BigInt &BigInt::operator++() { ++p().base(); return *this; }
 BigInt &BigInt::operator--() { --p().base(); return *this; }
 
-BigInt &BigInt::operator<<=(int x) {
+BigInt &BigInt::operator<<=(unsigned long x) {
     p().base() <<= x;
     return *this;
 }
 
-BigInt &BigInt::operator>>=(int x) {
+BigInt &BigInt::operator>>=(unsigned long x) {
     p().base() >>= x;
     return *this;
 }
