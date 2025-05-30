@@ -11,6 +11,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(bitmanip_tests, BasicTestingSetup)
@@ -270,14 +271,16 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_arbitrary_data) {
     for (size_t i = 0; i < 16; ++i) {
         // random piece of data up to 16KB in size
         const auto datablob = ctx.randbytes(ctx.randrange(16'000));
+        const auto ndatabits = datablob.size() * 8u;
         BOOST_REQUIRE(FromBoolVec(ToBoolVec(datablob)) == datablob); // sanity check
 
-        for (size_t j = 0; j < 64; ++j) {
+        for (size_t j = 0; j < 32; ++j) {
             // randomize shift amount
-            const int shiftamt = ctx.randrange(datablob.size() * 8u);
+            const int shiftamt_big = ctx.randrange(ndatabits),
+                      shiftamt_small = ctx.randrange(std::min<size_t>(ndatabits, 80));
 
             // shift both in left and right shift directions, and test vs verify function
-            for (const auto amt : {shiftamt, -shiftamt}) {
+            for (const auto amt : {shiftamt_big, -shiftamt_big, shiftamt_small, -shiftamt_small}) {
                 auto shifted = datablob;
                 bitShiftBlob(shifted, amt);
 
