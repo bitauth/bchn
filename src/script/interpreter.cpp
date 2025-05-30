@@ -1016,32 +1016,41 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                                 return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
                             }
 
-                            size_t const origSize = stacktop(-2).size();
-                            ScriptBigInt num(stacktop(-2), fRequireMinimal, maxIntegerSize);
+                            popstack(stack); // consume nbits; numeric argument is now the topmost stack item
 
-                            popstack(stack); // consume nbits
-
-                            if (nbits != 0) { // if nbits == 0 the number already on the stack can remain, saving cycles
+                            if (nbits == 0) {
+                                // If nbits == 0 the number already on the stack can remain, saving cycles, however
+                                // we must still validate it.
+                                ScriptBigInt::throwIfInvalidScriptNumEncoding(stacktop(-1), fRequireMinimal, maxIntegerSize);
+                            } else {
+                                // nbits > 0, we must do actual work
+                                ScriptBigInt num(stacktop(-1), fRequireMinimal, maxIntegerSize);
                                 popstack(stack); // consume numeric argument
 
+                                bool valid;
                                 if (opcode == OP_LSHIFTNUM) {
-                                    // operator<<= is arithmetic lshift, r = a * 2^b
-                                    num.getMutableBigInt().operator<<=(nbits);
+                                    // arithmetic left shift, r = a * 2^b
+                                    valid = num.checkedLeftShift(nbits);
                                 } else {
-                                    // operator>>= is arithmetic rshift, r = a / 2^b (rounded towards negative infinity)
-                                    num.getMutableBigInt().operator>>=(nbits);
+                                    // arithmetic right shift, r = a / 2^b (rounded towards negative infinity)
+                                    valid = num.checkedRightShift(nbits);
+                                }
+
+                                if (!valid) {
+                                    // result did overflow, abort early before allocating any more vectors, etc
+                                    return set_error(serror, invalidNumberRangeError);
                                 }
 
                                 valtype vch = num.getvch();
-                                // Ensure result fits on stack & push result
+                                // Ensure result respects size limits; this check is superfluous with the above
+                                // checked*Shift() calls, but is here for belt-and-suspenders.
                                 if (vch.size() > maxScriptElementSize) {
-                                    return set_error(serror, invalidNumberRangeError);
+                                    return set_error(serror, ScriptError::PUSH_SIZE);
                                 }
                                 stack.push_back(std::move(vch));
                             }
 
-                            // TODO (calin): Talk to Jason about this costing, right now it's: input size + output size
-                            metrics.TallyPushOp(origSize + stack.back().size());
+                            metrics.TallyPushOp(stack.back().size());
                         }
                     } break;
 
@@ -1581,8 +1590,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &script, uint32_t
                         }
                         stack.push_back(std::move(data));
 
-                        // TODO (calin): Talk to Jason about this costing, right now it's just 2x the blob size
-                        metrics.TallyPushOp(2u * stack.back().size());
+                        metrics.TallyPushOp(stack.back().size());
                     } break;
 
 

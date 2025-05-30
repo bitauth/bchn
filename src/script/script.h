@@ -523,12 +523,9 @@ struct ScriptNumCommon : ScriptIntBase<Derived, UsesBigInt>, ScriptNumEncoding {
         }
     }
 
-protected:
-    using Base::ScriptIntBase;
-    using IntType = typename Base::IntType;
-
+    /// Throws `scriptnum_error` if `vch` is not a valid script number encoding.
     static
-    IntType fromBytes(std::vector<uint8_t> const& vch, bool fRequireMinimal, size_t maxIntegerSize) {
+    void throwIfInvalidScriptNumEncoding(std::vector<uint8_t> const& vch, bool fRequireMinimal, size_t maxIntegerSize) {
         if (vch.size() > maxIntegerSize) {
             throw scriptnum_error("script number overflow",
                                   maxIntegerSize > 8u ? ScriptError::INVALID_NUMBER_RANGE_BIG_INT
@@ -538,6 +535,15 @@ protected:
         if (fRequireMinimal && ! IsMinimallyEncoded(vch, maxIntegerSize)) {
             throw scriptnum_error("non-minimally encoded script number", ScriptError::MINIMALNUM);
         }
+    }
+
+protected:
+    using Base::ScriptIntBase;
+    using IntType = typename Base::IntType;
+
+    static
+    IntType fromBytes(std::vector<uint8_t> const& vch, bool fRequireMinimal, size_t maxIntegerSize) {
+        throwIfInvalidScriptNumEncoding(vch, fRequireMinimal, maxIntegerSize);
         return Derived::set_vch(vch);
     }
 
@@ -695,13 +701,20 @@ public:
     /// Returns the underlying BigInt; the returned BigInt is not guaranteed to be in valid consensus-legal range
     /// for pushing to the stack (a situation which may occur in tests).
     const BigInt &getBigInt() const { return value_; }
-    BigInt &getMutableBigInt() { return value_; }
 
     // Promote these base class static protected methods to public (for tests, etc).
     using ScriptIntBase::validBigIntRange;
     using ScriptIntBase::bigIntConsensusMin;
     using ScriptIntBase::bigIntConsensusMax;
     using ScriptIntBase::MAXIMUM_ELEMENT_SIZE_BIG_INT;
+
+    /// Performs operator<<= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
+    [[nodiscard]]
+    bool checkedLeftShift(int const bitcount) { return validBigIntRange(value_.operator<<=(bitcount)); }
+
+    /// Performs operator>>= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
+    [[nodiscard]]
+    bool checkedRightShift(int const bitcount) { return validBigIntRange(value_.operator>>=(bitcount)); }
 
 private:
     // Called by ScriptNumCommon::fromBytes
