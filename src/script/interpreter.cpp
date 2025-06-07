@@ -980,6 +980,23 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             popstack(stack);
                         } break;
 
+                        case OP_INVERT: {
+                            // bitwise inverts all bytes (non-numeric operand and result)
+                            // (x1 -> ~x1)
+                            if (stack.size() < 1) {
+                                return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                            }
+                            valtype &data = stacktop(-1);
+                            // Ensure result would respect size limits; this branch is only reachable from tests.
+                            if (data.size() > maxScriptElementSize) {
+                                return set_error(serror, ScriptError::PUSH_SIZE);
+                            }
+                            for (uint8_t &ch : data) {
+                                ch = ~ch;
+                            }
+                            metrics.TallyPushOp(data.size());
+                        } break;
+
                         case OP_EQUAL:
                         case OP_EQUALVERIFY:
                             // case OP_NOTEQUAL: // use OP_NUMNOTEQUAL
