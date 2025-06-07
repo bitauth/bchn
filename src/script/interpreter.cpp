@@ -237,7 +237,7 @@ struct EvalFrame {
             return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
         }
         if (controlStackTop()) {
-            // Inner-most control block is OP_BEGIN, so OP_ENDIF violates proper control structure
+            // Inner-most control block is OP_BEGIN, so OP_ELSE violates proper control structure
             return set_error(serror, ScriptError::UNBALANCED_CONTROL_FLOW);
         }
         vfExec.toggle_top(); // Tell the condition stack to invert its exec flag (to take or ignore the upcoming branch)
