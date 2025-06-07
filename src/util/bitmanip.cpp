@@ -7,29 +7,21 @@
 #include <compat/endian.h>
 
 #include <algorithm>
-#include <cmath>
 #include <climits>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 
-// Positive nbits: left-shift, negative nbits: right-shift
-void bitShiftBlob(const Span<std::byte> &span, int64_t nbits) {
-    if (nbits == std::numeric_limits<int64_t>::min()) {
-        // Refuse to operate on INT64_MIN bits since negating this is undefined
-        throw std::out_of_range("Cannot operate on INT64_MIN bits!");
-    }
-    if (span.size() > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / CHAR_BIT)) {
-        // Refuse to operate on a span of > INT64_MAX bits
-        throw std::out_of_range("Input byte span is too large (exceeds INT64_MAX bits)!");
+void bitShiftBlob(Span<std::byte> const &span, size_t const nbits, bool const rshift) {
+    if (span.size() > std::numeric_limits<size_t>::max() / CHAR_BIT) {
+        // Refuse to operate on a span larger than the size_t limit on bits
+        throw std::out_of_range("Input byte span is too large (exceeds std::numeric_limits<size_t>::max() bits)!");
     }
     if (span.empty() || nbits == 0) {
         // No work to do!
         return;
     }
-    int64_t const spanBitSize = span.size() * CHAR_BIT;
-    bool const rshift = nbits < 0;
-    nbits = std::min(std::abs(nbits), spanBitSize); // normalize nbits to be positive and <= span bit size
+    size_t const spanBitSize = span.size() * CHAR_BIT;
     if (nbits >= spanBitSize) {
         // Short-circuit return, fill with 0's
         std::memset(span.data(), 0, span.size());

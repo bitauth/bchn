@@ -12,6 +12,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(bitmanip_tests, BasicTestingSetup)
@@ -67,14 +68,13 @@ BOOST_AUTO_TEST_CASE(bit_count) {
 BOOST_AUTO_TEST_CASE(bitShiftBlob_exceptions) {
     std::byte *nullbytearray = nullptr;
     uint8_t *nulluchararray = nullptr;
+    const size_t size_t_max = std::numeric_limits<size_t>::max();
 
     // Check that a byte blob that has too many bits throws
-    BOOST_CHECK_THROW(bitShiftBlob({nullbytearray, INT64_MAX / 8 + 1}, 1), std::out_of_range);
-    BOOST_CHECK_THROW(bitShiftBlob({nulluchararray, INT64_MAX / 8 + 1}, 1), std::out_of_range);
-
-    // Check that special case of nbits == INT64_MIN throws
-    BOOST_CHECK_THROW(bitShiftBlob({nullbytearray, 0}, std::numeric_limits<int64_t>::min()), std::out_of_range);
-    BOOST_CHECK_THROW(bitShiftBlob({nulluchararray, 0}, std::numeric_limits<int64_t>::min()), std::out_of_range);
+    BOOST_CHECK_THROW(bitShiftBlob({nullbytearray, size_t_max / 8u + 1u}, 1, true), std::out_of_range);
+    BOOST_CHECK_THROW(bitShiftBlob({nullbytearray, size_t_max / 8u + 1u}, 1, false), std::out_of_range);
+    BOOST_CHECK_THROW(bitShiftBlob({nulluchararray, size_t_max / 8u + 1u}, 1, true), std::out_of_range);
+    BOOST_CHECK_THROW(bitShiftBlob({nulluchararray, size_t_max / 8u + 1u}, 1, false), std::out_of_range);
 }
 
 BOOST_AUTO_TEST_CASE(bitShiftBlob_small_vals) {
@@ -85,14 +85,14 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_small_vals) {
 
     for (size_t i = 0; i < 20'000; ++i) {
         const uint64_t datum = GetRand64();
-        const int shiftAmt = GetRandInt(64), shiftAmt32 = GetRandInt(32), shiftAmt16 = GetRandInt(16), shiftAmt8 = GetRandInt(8);
+        const size_t shiftAmt = GetRandInt(64), shiftAmt32 = GetRandInt(32), shiftAmt16 = GetRandInt(16), shiftAmt8 = GetRandInt(8);
 
         for (const bool rshift : {false, true}) {
             // 64-bit
             {
                 // binary shifting of bitShiftBlob behaves "as if" it's operating on big endian data
                 uint64_t datum_be = htobe64(datum);
-                bitShiftBlob(Spanify(datum_be), rshift ? -shiftAmt : shiftAmt);
+                bitShiftBlob(Spanify(datum_be), shiftAmt, rshift);
                 const uint64_t expected = rshift ? datum >> shiftAmt : datum << shiftAmt;
                 BOOST_CHECK_EQUAL(be64toh(datum_be), expected);
             }
@@ -102,7 +102,7 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_small_vals) {
                 // binary shifting of bitShiftBlob behaves "as if" it's operating on big endian data
                 const uint32_t datum32 = datum;
                 uint32_t datum_be = htobe32(datum32);
-                bitShiftBlob(Spanify(datum_be), rshift ? -shiftAmt32 : shiftAmt32);
+                bitShiftBlob(Spanify(datum_be), shiftAmt32, rshift);
                 const uint32_t expected = rshift ? datum32 >> shiftAmt32 : datum32 << shiftAmt32;
                 BOOST_CHECK_EQUAL(be32toh(datum_be), expected);
             }
@@ -112,7 +112,7 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_small_vals) {
                 // binary shifting of bitShiftBlob behaves "as if" it's operating on big endian data
                 const uint16_t datum16 = datum;
                 uint16_t datum_be = htobe16(datum16);
-                bitShiftBlob(Spanify(datum_be), rshift ? -shiftAmt16 : shiftAmt16);
+                bitShiftBlob(Spanify(datum_be), shiftAmt16, rshift);
                 const uint16_t expected = rshift ? datum16 >> shiftAmt16 : datum16 << shiftAmt16;
                 BOOST_CHECK_EQUAL(be16toh(datum_be), expected);
             }
@@ -122,7 +122,7 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_small_vals) {
                 // binary shifting of bitShiftBlob behaves "as if" it's operating on big endian data
                 const uint8_t datum8 = datum;
                 uint8_t datum_mutable = datum8;
-                bitShiftBlob(Spanify(datum_mutable), rshift ? -shiftAmt8 : shiftAmt8);
+                bitShiftBlob(Spanify(datum_mutable), shiftAmt8, rshift);
                 const uint8_t expected = rshift ? datum8 >> shiftAmt8 : datum8 << shiftAmt8;
                 BOOST_CHECK_EQUAL(datum_mutable, expected);
             }
@@ -223,46 +223,38 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_arbitrary_data) {
         BOOST_REQUIRE(FromBoolVec(ShiftBoolVec(ToBoolVec(ParseHex("deadbeef")), -67)) == ParseHex("00000000"));
     }
 
-    // simple check of leftShiftBlob and rightShiftBlob
+    // simple check of left and right shifting for bitShiftBlob
     {
-        std::vector<uint8_t> data, shifted, shifted2;
-        shifted2 = shifted = data = ParseHex("beeff00d");
-        leftShiftBlob(shifted, 4);
+        std::vector<uint8_t> data, shifted;
+        shifted = data = ParseHex("beeff00d");
+        bitShiftBlob(shifted, 4, false);
         BOOST_CHECK_EQUAL(HexStr(shifted), "eeff00d0");
-        bitShiftBlob(shifted2, 4);
-        BOOST_CHECK_EQUAL(HexStr(shifted), HexStr(shifted2));
         BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), 4)) == shifted); // check vs our verify code
         // right shift
-        shifted = shifted2 = data;
-        rightShiftBlob(shifted, 4);
+        shifted = data;
+        bitShiftBlob(shifted, 4, true);
         BOOST_CHECK_EQUAL(HexStr(shifted), "0beeff00");
-        bitShiftBlob(shifted2, -4); // synonymous with right shift of 4
-        BOOST_CHECK_EQUAL(HexStr(shifted), HexStr(shifted2));
         BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), -4)) == shifted); // check vs our verify code
         // left shift by 3 bits
-        shifted2 = shifted = data;
-        leftShiftBlob(shifted, 3);
+        shifted = data;
+        bitShiftBlob(shifted, 3, false);
         BOOST_CHECK_EQUAL(HexStr(shifted), "f77f8068");
-        bitShiftBlob(shifted2, 3);
-        BOOST_CHECK_EQUAL(HexStr(shifted2), "f77f8068");
+        BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), 3)) == shifted); // check vs our verify code
         // right shift by 3 bits
-        shifted2 = shifted = data;
-        rightShiftBlob(shifted, 3);
+        shifted = data;
+        bitShiftBlob(shifted, 3, true);
         BOOST_CHECK_EQUAL(HexStr(shifted), "17ddfe01");
-        bitShiftBlob(shifted2, -3);
-        BOOST_CHECK_EQUAL(HexStr(shifted2), "17ddfe01");
+        BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), -3)) == shifted); // check vs our verify code
         // left shift by 17 bits
-        shifted2 = shifted = data;
-        leftShiftBlob(shifted, 17);
+        shifted = data;
+        bitShiftBlob(shifted, 17, false);
         BOOST_CHECK_EQUAL(HexStr(shifted), "e01a0000");
-        bitShiftBlob(shifted2, 17);
-        BOOST_CHECK_EQUAL(HexStr(shifted2), "e01a0000");
+        BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), 17)) == shifted); // check vs our verify code
         // right shift by 17 bits
-        shifted2 = shifted = data;
-        rightShiftBlob(shifted, 17);
+        shifted = data;
+        bitShiftBlob(shifted, 17, true);
         BOOST_CHECK_EQUAL(HexStr(shifted), "00005f77");
-        bitShiftBlob(shifted2, -17);
-        BOOST_CHECK_EQUAL(HexStr(shifted2), "00005f77");
+        BOOST_CHECK(FromBoolVec(ShiftBoolVec(ToBoolVec(data), -17)) == shifted); // check vs our verify code
     }
 
     // Now, generate random pieces of data of random lengths and randomly shift the bits, verifying vs our
@@ -280,12 +272,14 @@ BOOST_AUTO_TEST_CASE(bitShiftBlob_arbitrary_data) {
                       shiftamt_small = ctx.randrange(std::min<size_t>(ndatabits, 80));
 
             // shift both in left and right shift directions, and test vs verify function
-            for (const auto amt : {shiftamt_big, -shiftamt_big, shiftamt_small, -shiftamt_small}) {
-                auto shifted = datablob;
-                bitShiftBlob(shifted, amt);
+            for (const auto amt : {shiftamt_big, shiftamt_small}) {
+                for (const bool rshift : {false, true}) {
+                    auto shifted = datablob;
+                    bitShiftBlob(shifted, amt, rshift);
 
-                auto expected = FromBoolVec(ShiftBoolVec(ToBoolVec(datablob), amt));
-                BOOST_CHECK(expected == shifted);
+                    auto expected = FromBoolVec(ShiftBoolVec(ToBoolVec(datablob), rshift ? -amt : amt));
+                    BOOST_CHECK(expected == shifted);
+                }
             }
         }
     }

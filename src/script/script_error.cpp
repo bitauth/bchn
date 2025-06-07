@@ -133,7 +133,7 @@ const char *ScriptErrorString(const ScriptError serror) {
 
         // Bit-shift errors
         case ScriptError::INVALID_BIT_SHIFT:
-            return "Given bit shift amount is not a number within the valid range [0, 80,000]";
+            return "Given bit shift amount is negative";
 
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:

@@ -32,21 +32,17 @@ inline uint32_t countBits(uint32_t v) {
 /**
  * @brief bitShiftBlob - Bit-shift a binary byte blob left or right, as if it were 1 large (unsigned) machine word.
  * @param span - The byte blob to bit-shift in-place
- * @param nbits - The number of bits to shift left/right. Positive values are for left-shift, negative for right-shift.
- * @pre `span` should be <= INT64_MAX / 8 in size. `nbits` must not be equal to INT64_MIN.
+ * @param nbits - The number of bits to shift left/right.
+ * @param rshift - If true, shift right, if false, shift left.
+ * @pre `span` should be <= std::numeric_limits<size_t>::max() / 8 in size.
  * @post `span` is bit-shifted in-place as if it were a giant span.size() * 8 bit machine word, with 0 bits shifted into
- * the right-most/left-most end. If `std::abs(nbits) >= span.size() * 8`, then the span is completely cleared with 0's.
- * @exception std::out_of_range - If either `span.size() > INT64_MAX / 8`, or if `nbits == INT64_MIN`.
+ * the right-most/left-most end. If `nbits >= span.size() * 8`, then the span is completely cleared with 0's (as a
+ * "fast-path" early return).
+ * @exception std::out_of_range - If `span.size() > std::numeric_limits<size_t>::max() / 8`.
  */
-void bitShiftBlob(const Span<std::byte> &span, int64_t nbits);
+void bitShiftBlob(Span<std::byte> const &span, size_t nbits, bool rshift);
 
-// helpers for above
-inline void leftShiftBlob (const Span<std::byte> &span, uint32_t const nbits) { bitShiftBlob(span,  static_cast<int64_t>(nbits)); }
-inline void rightShiftBlob(const Span<std::byte> &span, uint32_t const nbits) { bitShiftBlob(span, -static_cast<int64_t>(nbits)); }
-
-// overloads using uint8_t instead of std::byte
-inline void bitShiftBlob(const Span<uint8_t> &span, int64_t const nbits) {
-    bitShiftBlob(Span<std::byte>{reinterpret_cast<std::byte *>(span.data()), span.size()},  nbits);
+// Convenience overload of above using uint8_t instead of std::byte
+inline void bitShiftBlob(Span<uint8_t> const &span, size_t const nbits, bool const rshift) {
+    bitShiftBlob(Span<std::byte>{reinterpret_cast<std::byte *>(span.data()), span.size()},  nbits, rshift);
 }
-inline void leftShiftBlob (const Span<uint8_t> &span, uint32_t const nbits) { bitShiftBlob(span,  static_cast<int64_t>(nbits)); }
-inline void rightShiftBlob(const Span<uint8_t> &span, uint32_t const nbits) { bitShiftBlob(span, -static_cast<int64_t>(nbits)); }
