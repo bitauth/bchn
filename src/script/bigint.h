@@ -204,10 +204,10 @@ public:
     friend BigInt operator&(const BigInt &a, const BigInt &b) { BigInt r(a); return r &= b; }
     friend BigInt operator^(const BigInt &a, const BigInt &b) { BigInt r(a); return r ^= b; }
 
-    BigInt &operator<<=(int); // left-shift
-    BigInt &operator>>=(int); // right-shift
-    BigInt  operator<<(int n) const { BigInt r(*this); return r <<= n; }
-    BigInt  operator>>(int n) const { BigInt r(*this); return r >>= n; }
+    BigInt &operator<<=(unsigned long); // left-shift
+    BigInt &operator>>=(unsigned long); // right-shift
+    BigInt  operator<<(unsigned long n) const { BigInt r(*this); return r <<= n; }
+    BigInt  operator>>(unsigned long n) const { BigInt r(*this); return r >>= n; }
 
     BigInt operator-() const { BigInt ret(*this); ret.negate(); return ret; } // sign negate
 

@@ -147,6 +147,10 @@ const char *GetOpName(opcodetype opcode) {
             return "OP_EQUAL";
         case OP_EQUALVERIFY:
             return "OP_EQUALVERIFY";
+        case OP_LSHIFTBIN:
+            return "OP_LSHIFTBIN";
+        case OP_RSHIFTBIN:
+            return "OP_RSHIFTBIN";
 
         // functions
         case OP_DEFINE:
@@ -159,10 +163,10 @@ const char *GetOpName(opcodetype opcode) {
             return "OP_1ADD";
         case OP_1SUB:
             return "OP_1SUB";
-        case OP_2MUL:
-            return "OP_2MUL";
-        case OP_2DIV:
-            return "OP_2DIV";
+        case OP_LSHIFTNUM:
+            return "OP_LSHIFTNUM";
+        case OP_RSHIFTNUM:
+            return "OP_RSHIFTNUM";
         case OP_NEGATE:
             return "OP_NEGATE";
         case OP_ABS:
@@ -181,10 +185,6 @@ const char *GetOpName(opcodetype opcode) {
             return "OP_DIV";
         case OP_MOD:
             return "OP_MOD";
-        case OP_LSHIFT:
-            return "OP_LSHIFT";
-        case OP_RSHIFT:
-            return "OP_RSHIFT";
         case OP_BOOLAND:
             return "OP_BOOLAND";
         case OP_BOOLOR:

@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2024 The Bitcoin developers
+# Copyright (c) 2017-2025 The Bitcoin developers
 
 project(bitcoind)
 
@@ -387,6 +387,7 @@ add_library(util
   threadinterrupt.cpp
   uint256.cpp
   util/asmap.cpp
+  util/bitmanip.cpp
   util/check.cpp
   util/moneystr.cpp
   util/saltedhashers.cpp

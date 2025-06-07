@@ -107,6 +107,9 @@ enum class ScriptError {
     FUNCTION_OVERWRITE_DISALLOWED,
     INVOKED_UNDEFINED_FUNCTION,
 
+    /* Bit Shift */
+    INVALID_BIT_SHIFT,
+
     ERROR_COUNT,
 };
 

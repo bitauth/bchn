@@ -90,12 +90,12 @@ static void CleanupScriptCode(CScript &scriptCode,
 static bool IsOpcodeDisabled(opcodetype opcode, uint32_t flags) {
     switch (opcode) {
         case OP_INVERT:
-        case OP_2MUL:
-        case OP_2DIV:
-        case OP_LSHIFT:
-        case OP_RSHIFT:
-            // Disabled opcodes.
-            return true;
+        case OP_LSHIFTNUM:
+        case OP_RSHIFTNUM:
+        case OP_LSHIFTBIN:
+        case OP_RSHIFTBIN:
+            // Disabled before May 2026
+            return (flags & SCRIPT_ENABLE_MAY2026) == 0;
         case OP_MUL:
             return (flags & SCRIPT_64_BIT_INTEGERS) == 0;
         default:
@@ -1219,6 +1219,107 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                         } break;
 
+                        case OP_LSHIFTNUM:
+                        case OP_RSHIFTNUM: {
+                            // (num nbits -- out)
+                            // LSHIFTNUM is an arithmetic 2's complement left-shift,  defined as: out = num * 2^nbits
+                            // RSHIFTNUM is an arithmetic 2's complement right-shift, defined as: out = num / 2^nbits
+                            // Rounding is always done towards negative infinity, like in C++20 operator>>, so e.g.:
+                            //     `-1 >> 1 == -1`, but `1 >> 1 == 0`.
+                            if (stack.size() < 2) {
+                                return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                            }
+                            // Note, we don't support this operation before arbitrary precision arithmetic activated.
+                            // Also note that these op-codes are marked "disabled" by IsOpcodeDisabled() before May 2026,
+                            // since the op-code values corresponded to historical OP_2MUL/OP_2DIV (disabled by Satoshi).
+                            if constexpr (!UsesBigInt) {
+                                // This branch is never taken outside of tests.
+                                return set_error(serror, ScriptError::UNKNOWN);
+                            } else {
+                                constexpr uint64_t maxScriptNumBits = 8u * std::max(CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT,
+                                                                                    ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT);
+                                static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > maxScriptNumBits,
+                                              "Assumption is a 32-bit int can hold more than the bit size of a script number");
+                                static_assert(std::is_same_v<ScriptNumType, ScriptBigInt>, "Defensive programming redundant check");
+                                // Note: This call clamps i32bits to the range: [INT_MIN, INT_MAX].
+                                int32_t const i32bits = stacktop(-1).size() <= maxIntegerSizeLegacy
+                                                          // Use allocation-less non-BigInt if the nbits argument is small
+                                                        ? CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32()
+                                                          // Resort to BigInt-based script nums for larger arguments
+                                                        : ScriptBigInt(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
+
+                                // Disallow negative bit counts
+                                if (i32bits < 0) {
+                                    return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
+                                }
+
+                                uint64_t const nbits = static_cast<uint64_t>(i32bits); // prefer uint64_t for below code
+
+                                popstack(stack); // consume nbits; numeric argument is now the topmost stack item
+
+                                if (nbits == 0) {
+                                    // If nbits == 0 the number already on the stack can remain, saving cycles, however we
+                                    // must still validate it; we never accept an invalid number as a numeric argument.
+                                    ScriptBigInt::throwIfInvalidScriptNumEncoding(stacktop(-1), fRequireMinimal, maxIntegerSize);
+                                } else {
+                                    // nbits > 0, we must do actual work
+                                    ScriptBigInt num(stacktop(-1), fRequireMinimal, maxIntegerSize);
+                                    popstack(stack); // consume numeric argument
+
+                                    bool valid{};
+                                    if (num == 0) {
+                                        // Number was zero: No work needs to be done, since all possible shifts yield 0.
+                                        valid = true;
+                                    } else {
+                                        // Non-zero number: Maybe do work.
+                                        uint64_t const inputNumBits = num.getBigInt().absValNumBits();
+                                        if (opcode == OP_LSHIFTNUM) {
+                                            /* Left shift */
+                                            if (nbits + inputNumBits > maxScriptNumBits) {
+                                                // To avoid needless CPU churn, refuse to left-shift a non-zero value if it
+                                                // would yield a result that would exceed 80k bits, since that would always
+                                                // yield a consensus-invalid number.
+                                                valid = false;
+                                            } else {
+                                                // Arithmetic left shift, r = a * 2^b
+                                                valid = num.checkedLeftShift(nbits);
+                                            }
+                                        } else {
+                                            /* Right shift */
+                                            if (nbits >= inputNumBits) {
+                                                // Fast-path optimization -- right-shifting >= the number of bits in the
+                                                // actual number always yields -1 for negative numbers and 0 otherwise.
+                                                if (num < 0) {
+                                                    num = ScriptBigInt::fromIntUnchecked(-1);
+                                                } else {
+                                                    num = ScriptBigInt::fromIntUnchecked(0);
+                                                }
+                                                valid = true;
+                                            } else {
+                                                // Arithmetic right shift, r = a / 2^b (rounded towards negative infinity)
+                                                valid = num.checkedRightShift(nbits);
+                                            }
+                                        }
+                                    }
+
+                                    if (!valid) {
+                                        // result overflow, abort early before allocating any more vectors, etc
+                                        return set_error(serror, invalidNumberRangeError);
+                                    }
+
+                                    valtype vch = num.getvch();
+                                    // Ensure result respects size limits; this check is redundant with the above code
+                                    // block, but is here for belt-and-suspenders.
+                                    if (vch.size() > maxScriptElementSize) {
+                                        return set_error(serror, ScriptError::PUSH_SIZE);
+                                    }
+                                    stack.push_back(std::move(vch));
+                                }
+
+                                metrics.TallyPushOp(stack.back().size());
+                            }
+                        } break;
+
                         case OP_WITHIN: {
                             // (x min max -- out)
                             if (stack.size() < 3) {
@@ -1722,6 +1823,54 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                         } break;
 
+                        case OP_LSHIFTBIN:
+                        case OP_RSHIFTBIN: {
+                            // (in nbits -- out)
+                            // Left (or right) shift of an arbitrary byte-blob as if it were a big in.size()-bit word,
+                            // padding with 0 bits at the rightmost (or leftmost) end.
+                            if (stack.size() < 2) {
+                                return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                            }
+                            constexpr uint64_t maxDataPushBits = 8u * std::max(MAX_SCRIPT_ELEMENT_SIZE_LEGACY,
+                                                                               may2025::MAX_SCRIPT_ELEMENT_SIZE);
+                            static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > maxDataPushBits,
+                                          "Assumption is a 32-bit int can hold more than the bit size of a data push");
+
+                            // Note: The below call to `getint32()` is a saturating call that clamps to [INT_MIN, INT_MAX].
+                            //
+                            // The spec allows for the bit count argument to be *any* script number even if it exceeds 80k
+                            // bits! However, our `bitShiftBlob()` API only supports bit shifting up to `size_t`-max bits.
+                            // So, in order to handle this, and as an optimization, we just saturate `nbits` to INT_MAX here
+                            // even if the number of bits requested is > 2^31 - 1. Since the input data can never exceed 80k
+                            // bits (let alone INT_MAX bits), this is ok and produces consensus-correct behavior.
+                            int32_t const nbits = stacktop(-1).size() <= maxIntegerSizeLegacy
+                                                    // Use allocation-less non-BigInt if the nbits argument is small
+                                                  ? CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32()
+                                                    // Resort to (possibly) BigInt-based script nums for larger arguments
+                                                  : ScriptNumType(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
+
+                            // Negative bit counts are not allowed
+                            if (nbits < 0) {
+                                return set_error(serror, ScriptError::INVALID_BIT_SHIFT);
+                            }
+                            valtype data = std::move(stacktop(-2));
+
+                            popstack(stack);
+                            popstack(stack);
+
+                            // Note: If bit shifting exceeds the number of bits in `data`, that's ok, `bitShiftBlob`
+                            // returns quickly, having zeroed-out `data` in that case.
+                            bitShiftBlob(data, nbits, /* right shift = */ opcode == OP_RSHIFTBIN);
+
+                            // Belt-and-suspenders redundant check: Ensure result fits on stack & push result.
+                            if (data.size() > maxScriptElementSize) {
+                                // This branch can never be taken outside of tests.
+                                return set_error(serror, ScriptError::PUSH_SIZE);
+                            }
+                            stack.push_back(std::move(data));
+
+                            metrics.TallyPushOp(stack.back().size());
+                        } break;
 
                         // Note: For the introspection opcodes, we intentionally use CScriptNum for reading/writing the
                         //       inputs/outputs of these opcodes as a performance optimization, since their parameters

@@ -142,6 +142,8 @@ const char *ScriptErrorString(const ScriptError serror) {
             return "Redefinition of an existing function with the same identifier is disallowed";
         case ScriptError::INVOKED_UNDEFINED_FUNCTION:
             return "Attempted to invoke an undefined function";
+        case ScriptError::INVALID_BIT_SHIFT:
+            return "Given bit shift amount is negative";
 
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:
