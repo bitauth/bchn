@@ -57,7 +57,7 @@ def setup():
         shutil.copytree(src, dst)
     os.chdir('gitian-builder')
     make_image_prog = ['bin/make-base-vm',
-                       '--distro', 'debian', '--suite', 'buster', '--arch', 'amd64']
+                       '--distro', 'ubuntu', '--suite', 'jammy', '--arch', 'amd64']
     if args.docker:
         make_image_prog += ['--docker']
     elif not args.kvm:

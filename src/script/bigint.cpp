@@ -1,4 +1,4 @@
-// Copyright (c) 2024 The Bitcoin developers
+// Copyright (c) 2024-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -26,18 +27,10 @@
 #include <gmpxx.h>
 
 namespace {
-// TODO: Replace with std::in_range when C++20 is supported
 template <typename Target, typename Int>
 bool NumFits(Int x) {
     static_assert(std::is_integral_v<Int> && std::is_integral_v<Target> && std::is_signed_v<Int> == std::is_signed_v<Target>);
-    return x >= std::numeric_limits<Target>::min() && x <= std::numeric_limits<Target>::max();
-}
-
-// TODO: Replace with std::endian when C++20 is supported
-[[maybe_unused]]
-bool IsBigEndianHost() {
-    const uint32_t tst = 1u;
-    return *reinterpret_cast<const unsigned char *>(&tst) != 1u;
+    return std::in_range<Target>(x);
 }
 
 template <typename I>
@@ -52,12 +45,12 @@ template <typename UInt>
 std::enable_if_t<std::is_integral_v<UInt> && std::is_unsigned_v<UInt>, UInt>
 /* UInt */ SwapIfBigEndianHost(UInt ux, bool htole [[maybe_unused]]) {
     EnsureIntAtLeast64Bits<UInt>();
-    if constexpr (sizeof(UInt) == sizeof(uint64_t)) {
-        ux = htole ? htole64(ux) : le64toh(ux);
-    } else {
-        // runtime endian detect
-        if (IsBigEndianHost()) {
-            // native order is big endian; do reversal
+    if constexpr (std::endian::native == std::endian::big) {
+        // Native order is big endian; do reversal
+        if constexpr (sizeof(UInt) == sizeof(uint64_t)) {
+            ux = htole ? htole64(ux) : le64toh(ux);
+        } else {
+            // This branch is only taken on uint128_t
             auto *begin = reinterpret_cast<std::byte *>(&ux);
             auto *end = begin + sizeof(ux);
             std::reverse(begin, end);

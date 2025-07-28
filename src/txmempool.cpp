@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2024 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -161,7 +161,7 @@ void CTxMemPool::AddTransactionsUpdated(unsigned int n) {
     nTransactionsUpdated += n;
 }
 
-void CTxMemPool::addUnchecked(CTxMemPoolEntry &&entry) {
+uint64_t CTxMemPool::addUnchecked(CTxMemPoolEntry &&entry) {
     // get a guaranteed unique id (in case tests re-use the same object)
     entry.SetEntryId(nextEntryId++);
 
@@ -207,6 +207,7 @@ void CTxMemPool::addUnchecked(CTxMemPoolEntry &&entry) {
 
     nTransactionsUpdated++;
     totalTxSize += entry.GetTxSize();
+    return newit->GetEntryId();
 }
 
 void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason) {
@@ -482,15 +483,6 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const {
     assert(innerUsage == cachedInnerUsage);
 }
 
-bool CTxMemPool::CompareTopologically(const TxId &txida, const TxId &txidb) const {
-    LOCK(cs);
-    auto it1 = mapTx.find(txida);
-    if (it1 == mapTx.end()) return false;
-    auto it2 = mapTx.find(txidb);
-    if (it2 == mapTx.end()) return true;
-    return it1->GetEntryId() < it2->GetEntryId();
-}
-
 void CTxMemPool::queryHashes(std::vector<uint256> &vtxid) const {
     LOCK(cs);
 
@@ -506,7 +498,8 @@ static TxMempoolInfo
 GetInfo(CTxMemPool::indexed_transaction_set::const_iterator it) {
     return TxMempoolInfo{it->GetSharedTx(), it->GetTime(),
                          CFeeRate(it->GetFee(), it->GetTxSize()),
-                         it->GetModifiedFee() - it->GetFee()};
+                         it->GetModifiedFee() - it->GetFee(),
+                         it->GetEntryId()};
 }
 
 std::vector<TxMempoolInfo> CTxMemPool::infoAll() const {

@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2021 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -584,7 +584,7 @@ void TransactionView::openThirdPartyTxUrl(QString url) {
 
 QWidget *TransactionView::createDateRangeWidget() {
     dateRangeWidget = new QFrame();
-    dateRangeWidget->setFrameStyle(QFrame::Panel | QFrame::Raised);
+    dateRangeWidget->setFrameStyle(QFrame::Panel | static_cast<int>(QFrame::Raised));
     dateRangeWidget->setContentsMargins(1, 1, 1, 1);
     QHBoxLayout *layout = new QHBoxLayout(dateRangeWidget);
     layout->setContentsMargins(0, 0, 0, 0);

@@ -57,12 +57,13 @@ You can check the version with `lxc-execute --version`.
 ## MacOS code signing
 
 In order to sign builds for MacOS, you need to obtain an archive which has been
-extracted from the free SDK.
+extracted from the free SDK. **Note**: The SDK *must* include the C++ headers for OSX, which should live in the archive
+under `usr/include/c++/v1`.
 
 ```bash
 cd ~/gitian-builder
-curl -LO https://github.com/phracker/MacOSX-SDKs/releases/download/10.15/MacOSX10.15.sdk.tar.xz
-echo "2408d07df7f324d3beea818585a6d990ba99587c218a3969f924dfcc4de93b62 MacOSX10.15.sdk.tar.xz" | sha256sum -c
+curl -LO https://github.com/joseluisq/macosx-sdks/releases/download/10.15/MacOSX10.15.sdk.tar.xz
+echo "aee7b132a4b10cc26ab9904706412fd0907f5b8b660251e465647d8763f9f009 MacOSX10.15.sdk.tar.xz" | sha256sum -c
 # Should echo "MacOSX10.15.sdk.tar.xz: OK"
 mkdir -p inputs
 mv MacOSX10.15.sdk.tar.xz inputs

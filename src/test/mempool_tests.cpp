@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2024 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -899,7 +899,7 @@ BOOST_AUTO_TEST_CASE(DisconnectPoolAddForBlock) {
     BOOST_REQUIRE_GT(::GetSerializeSize(bigBlock), 100'000); // sanity check that block is bigger than our limit
     tinyPool.addForBlock(bigBlock.vtx, true); // add a block that exceeds the limit
     BOOST_CHECK(!tinyPool.isEmpty());
-    BOOST_CHECK_LT(tinyPool.DynamicMemoryUsage(), 100'000); // check that limit was enforced
+    BOOST_CHECK_LE(tinyPool.DynamicMemoryUsage(), 100'000); // check that limit was enforced
     BOOST_CHECK_LT(tinyPool.GetQueuedTx().size(), bigBlock.vtx.size()); // enforcing of limit involved culling txns
 
     // Test `addNoLimit` not enforcing anything

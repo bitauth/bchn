@@ -1,5 +1,5 @@
 // Copyright (c) 2017 The Bitcoin Core developers
-// Copyright (c) 2020-2024 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,12 +9,13 @@
 #include <rpc/protocol.h>
 #include <rpc/util.h>
 #include <tinyformat.h>
+#include <util/overloaded.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 
 #include <univalue.h>
 
-#include <boost/variant/static_visitor.hpp>
+#include <variant>
 
 NodeContext *g_rpc_node = nullptr;
 
@@ -94,27 +95,15 @@ CScript CreateMultisigRedeemscript(const int required,
     return result;
 }
 
-class DescribeAddressVisitor : public boost::static_visitor<void> {
-    UniValue::Object& obj;
-public:
-    explicit DescribeAddressVisitor(UniValue::Object& _obj) : obj(_obj) {}
-
-    void operator()(const CNoDestination &) const {
-    }
-
-    void operator()(const CKeyID &) const {
-        obj.emplace_back("isscript", false);
-    }
-
-    void operator()(const ScriptID &) const {
-        obj.emplace_back("isscript", true);
-    }
-};
-
 // Upstream version of this function has only one argument and returns an intermediate UniValue object.
 // Instead, our version directly appends the new key-value pairs to the target UniValue object.
 void DescribeAddress(const CTxDestination &dest, UniValue::Object& obj) {
-    boost::apply_visitor(DescribeAddressVisitor(obj), dest);
+    std::visit(
+        util::Overloaded {
+            [](const CNoDestination &) {},
+            [&obj](const CKeyID &) { obj.emplace_back("isscript", false); },
+            [&obj](const ScriptID &) { obj.emplace_back("isscript", true); },
+        }, dest);
 }
 
 struct Section {

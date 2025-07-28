@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 The Bitcoin developers
+// Copyright (c) 2018-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -179,6 +179,7 @@ BOOST_AUTO_TEST_CASE(median_time_past) {
                                                    {9, 4}}};
     for (size_t i = 0; i < indices.size(); i++) {
         indices[i].nTime = times2[i].first;
+        indices[i].ClearCachedMTPValue();
         BOOST_CHECK(indices[i].GetMedianTimePast() == times2[i].second);
     }
 }

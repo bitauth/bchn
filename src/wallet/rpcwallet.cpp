@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2018 The Bitcoin Core developers
-// Copyright (c) 2020-2024 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -648,7 +648,7 @@ static UniValue signmessage(const Config &config,
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid address");
     }
 
-    const CKeyID *keyID = boost::get<CKeyID>(&dest);
+    const CKeyID *keyID = std::get_if<CKeyID>(&dest);
     if (!keyID) {
         throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to key");
     }
@@ -3364,7 +3364,7 @@ static UniValue listunspent(const Config &config,
             }
 
             if (scriptPubKey.IsPayToScriptHash(scriptFlags)) {
-                const ScriptID &hash = boost::get<ScriptID>(address);
+                const ScriptID &hash = std::get<ScriptID>(address);
                 CScript redeemScript;
                 if (pwallet->GetCScript(hash, redeemScript)) {
                     entry.emplace_back("redeemScript", HexStr(redeemScript));
@@ -3841,7 +3841,7 @@ UniValue rescanblockchain(const Config &config, const JSONRPCRequest &request) {
 static void DescribeWalletAddress(CWallet *pwallet, const CTxDestination &dest, UniValue::Object& obj,
                                   const uint32_t scriptFlags);
 
-class DescribeWalletAddressVisitor : public boost::static_visitor<void> {
+class DescribeWalletAddressVisitor {
     CWallet *const pwallet;
     UniValue::Object& obj;
     uint32_t scriptFlags{};
@@ -3902,8 +3902,7 @@ public:
     explicit DescribeWalletAddressVisitor(CWallet *_pwallet, UniValue::Object& _obj, uint32_t scriptFlags_)
         : pwallet(_pwallet), obj(_obj), scriptFlags(scriptFlags_) {}
 
-    void operator()(const CNoDestination &dest) const {
-    }
+    void operator()(const CNoDestination &) const {}
 
     void operator()(const CKeyID &keyID) const {
         CPubKey vchPubKey;
@@ -3926,7 +3925,7 @@ public:
 static void DescribeWalletAddress(CWallet *pwallet, const CTxDestination &dest, UniValue::Object& obj,
                                   const uint32_t scriptFlags) {
     DescribeAddress(dest, obj);
-    boost::apply_visitor(DescribeWalletAddressVisitor(pwallet, obj, scriptFlags), dest);
+    std::visit(DescribeWalletAddressVisitor(pwallet, obj, scriptFlags), dest);
 }
 
 /** Convert CAddressBookData to JSON record.  */

@@ -883,8 +883,10 @@ public:
     bool IsPayToScriptHash(uint32_t flags, std::vector<uint8_t> *hash_out = nullptr, bool *is_p2sh_32 = nullptr) const;
     bool IsPayToPubKeyHash() const;
     bool IsCommitment(const std::vector<uint8_t> &data) const;
-    bool IsWitnessProgram(int &version, std::vector<uint8_t> &program) const;
-    bool IsWitnessProgram() const;
+    bool IsWitnessProgram(int *pversion = nullptr, std::vector<uint8_t> *pprogram = nullptr) const;
+    bool IsWitnessProgram(int &version, std::vector<uint8_t> &program) const {
+        return IsWitnessProgram(&version, &program);
+    }
 
     /**
      * Called by IsStandardTx and P2SH/BIP62 VerifyScript (which makes it

@@ -11,16 +11,15 @@
 #include <script/script_flags.h>
 #include <uint256.h>
 
-#include <boost/variant.hpp>
-
 #include <cstdint>
+#include <variant>
 
 class CKeyID;
 class CScript;
 
 /** A reference to a CScript: the Hash160 or Hash256 of its serialization (see script.h) */
 class ScriptID {
-    using var_t = boost::variant<uint160, uint256>;
+    using var_t = std::variant<uint160, uint256>;
     var_t var;
 public:
     ScriptID() noexcept : var{uint160()} {}
@@ -32,13 +31,14 @@ public:
     ScriptID & operator=(const uint256 &in) noexcept { var = in; return *this; }
 
     bool operator==(const ScriptID &o) const { return var == o.var; }
+    bool operator!=(const ScriptID &o) const { return var != o.var; }
     bool operator<(const ScriptID &o) const { return var < o.var; }
-    bool operator==(const uint160 &o) const { return IsP2SH_20() && boost::get<uint160>(var) == o; }
-    bool operator==(const uint256 &o) const { return IsP2SH_32() && boost::get<uint256>(var) == o; }
+    bool operator==(const uint160 &o) const { return IsP2SH_20() && std::get<uint160>(var) == o; }
+    bool operator==(const uint256 &o) const { return IsP2SH_32() && std::get<uint256>(var) == o; }
 
-    uint8_t *begin() { return boost::apply_visitor([](auto &&alt) { return alt.begin(); }, var); }
-    uint8_t *end() { return boost::apply_visitor([](auto &&alt) { return alt.end(); }, var); }
-    uint8_t *data() { return boost::apply_visitor([](auto &&alt) { return alt.data(); }, var); }
+    uint8_t *begin() { return std::visit([](auto &&alt) { return alt.begin(); }, var); }
+    uint8_t *end() { return std::visit([](auto &&alt) { return alt.end(); }, var); }
+    uint8_t *data() { return std::visit([](auto &&alt) { return alt.data(); }, var); }
     const uint8_t *begin() const { return const_cast<ScriptID *>(this)->begin(); }
     const uint8_t *end() const { return const_cast<ScriptID *>(this)->end(); }
     const uint8_t *data() const { return const_cast<ScriptID *>(this)->data(); }
@@ -47,8 +47,8 @@ public:
     uint8_t & operator[](size_t i) { return data()[i]; }
     const uint8_t & operator[](size_t i) const { return data()[i]; }
 
-    bool IsP2SH_20() const { return boost::get<uint160>(&var) != nullptr; }
-    bool IsP2SH_32() const { return boost::get<uint256>(&var) != nullptr; }
+    bool IsP2SH_20() const { return std::get_if<uint160>(&var) != nullptr; }
+    bool IsP2SH_32() const { return std::get_if<uint256>(&var) != nullptr; }
 };
 
 /**
@@ -88,8 +88,11 @@ public:
     friend bool operator==(const CNoDestination &, const CNoDestination &) {
         return true;
     }
+    friend bool operator!=(const CNoDestination &, const CNoDestination &) {
+        return false;
+    }
     friend bool operator<(const CNoDestination &, const CNoDestination &) {
-        return true;
+        return false;
     }
 };
 
@@ -100,7 +103,7 @@ public:
  *  * ScriptID: TX_SCRIPTHASH destination
  *  A CTxDestination is the internal data type encoded in a Bitcoin Cash address
  */
-using CTxDestination = boost::variant<CNoDestination, CKeyID, ScriptID>;
+using CTxDestination = std::variant<CNoDestination, CKeyID, ScriptID>;
 
 /** Check whether a CTxDestination is a CNoDestination. */
 bool IsValidDestination(const CTxDestination &dest);

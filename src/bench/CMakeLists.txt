@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2020 The Bitcoin developers
+# Copyright (c) 2018-2025 The Bitcoin developers
 
 project(bench_bitcoin)
 
@@ -58,6 +58,7 @@ add_executable(bench_bitcoin
 	json_util.cpp
 	libauth_bench.cpp
 	lockedpool.cpp
+	mediantimepast.cpp
 	mempool_eviction.cpp
 	merkle_root.cpp
 	net_messages.cpp

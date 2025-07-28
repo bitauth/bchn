@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
 // Copyright (c) 2022 The Bitcoin Cash Node developers
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -50,7 +50,6 @@ TransactionRecord::decomposeTransaction(const interfaces::WalletTx &wtx) {
             isminetype mine = wtx.txout_is_mine[i];
             if (mine) {
                 TransactionRecord sub(txid, nTime);
-                CTxDestination address;
                 sub.idx = i; // vout index
                 sub.credit = txout.nValue;
                 sub.involvesWatchAddress = mine & ISMINE_WATCH_ONLY;
@@ -122,7 +121,7 @@ TransactionRecord::decomposeTransaction(const interfaces::WalletTx &wtx) {
                     continue;
                 }
 
-                if (!boost::get<CNoDestination>(&wtx.txout_address[nOut])) {
+                if (!std::get_if<CNoDestination>(&wtx.txout_address[nOut])) {
                     // Sent to Bitcoin Address
                     sub.type = TransactionRecord::SendToAddress;
                     sub.address =

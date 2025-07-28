@@ -1,6 +1,6 @@
 // Copyright (c) 2012 Pieter Wuille
 // Copyright (c) 2012-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,7 +22,40 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
+
+/**
+ * User-defined type for the internally used nIds
+ * This used to be int, making it feasible for attackers to cause an overflow,
+ * see https://bitcoincore.org/en/2024/07/31/disclose-addrman-int-overflow/
+ */
+class NidType {
+    int64_t value = -1;
+public:
+    /// Default constructed NidType is always invalid
+    NidType() noexcept = default;
+
+    /// Returns true iff the contained value is valid
+    bool IsValid() const { return value >= 0; }
+
+    bool operator<(const NidType &o) const noexcept { return value < o.value; }
+    bool operator==(const NidType &o) const noexcept { return value == o.value; }
+    bool operator!=(const NidType &o) const noexcept { return ! this->operator==(o); }
+
+protected:
+    // Below methods are used internally by CAddrMan
+    friend class CAddrMan;
+
+    explicit NidType(int64_t val) noexcept : value{val} {}
+
+    int64_t Get() const { return value; }
+    void Set(int64_t val) { value = val; }
+    void SetInvalid() noexcept { value = -1; }
+
+    NidType operator++(int) noexcept { return NidType(value++); } // postfix increment
+    NidType &operator++() noexcept { ++value; return *this; } // prefix increment
+};
 
 /**
  * Extended statistics about a CAddress
@@ -190,36 +223,36 @@ protected:
     mutable RecursiveMutex cs;
 
 private:
-    //! last used nId
-    int nIdCount GUARDED_BY(cs);
+    //! first unused nId
+    NidType nIdCount GUARDED_BY(cs) {0};
 
     //! table with information about all nIds
-    std::map<int, CAddrInfo> mapInfo GUARDED_BY(cs);
+    std::map<NidType, CAddrInfo> mapInfo GUARDED_BY(cs);
 
     //! find an nId based on its network address
-    std::map<CNetAddr, int> mapAddr GUARDED_BY(cs);
+    std::map<CNetAddr, NidType> mapAddr GUARDED_BY(cs);
 
     //! randomly-ordered vector of all nIds
-    std::vector<int> vRandom GUARDED_BY(cs);
+    std::vector<NidType> vRandom GUARDED_BY(cs);
 
     // number of "tried" entries
     int nTried GUARDED_BY(cs);
 
     //! list of "tried" buckets
-    int vvTried[ADDRMAN_TRIED_BUCKET_COUNT][ADDRMAN_BUCKET_SIZE] GUARDED_BY(cs);
+    NidType vvTried[ADDRMAN_TRIED_BUCKET_COUNT][ADDRMAN_BUCKET_SIZE] GUARDED_BY(cs);
 
     //! number of (unique) "new" entries
     int nNew GUARDED_BY(cs);
 
     //! list of "new" buckets
-    int vvNew[ADDRMAN_NEW_BUCKET_COUNT][ADDRMAN_BUCKET_SIZE] GUARDED_BY(cs);
+    NidType vvNew[ADDRMAN_NEW_BUCKET_COUNT][ADDRMAN_BUCKET_SIZE] GUARDED_BY(cs);
 
     //! last time Good was called (memory only)
     int64_t nLastGood GUARDED_BY(cs);
 
     //! Holds addrs inserted into tried table that collide with existing
     //! entries. Test-before-evict discipline used to resolve these collisions.
-    std::set<int> m_tried_collisions;
+    std::set<NidType> m_tried_collisions;
 
 protected:
     //! secret key to randomize bucket select with
@@ -229,39 +262,33 @@ protected:
     FastRandomContext insecure_rand;
 
     //! Find an entry.
-    CAddrInfo *Find(const CNetAddr &addr, int *pnId = nullptr)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    CAddrInfo *Find(const CNetAddr &addr, NidType *pnId = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! find an entry, creating it if necessary.
     //! nTime and nServices of the found node are updated, if necessary.
-    CAddrInfo *Create(const CAddress &addr, const CNetAddr &addrSource,
-                      int *pnId = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    CAddrInfo *Create(const CAddress &addr, const CNetAddr &addrSource, NidType *pnId = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Swap two elements in vRandom.
-    void SwapRandom(unsigned int nRandomPos1, unsigned int nRandomPos2)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void SwapRandom(unsigned int nRandomPos1, unsigned int nRandomPos2) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Move an entry from the "new" table(s) to the "tried" table
-    void MakeTried(CAddrInfo &info, int nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void MakeTried(CAddrInfo &info, NidType nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Delete an entry. It must not be in tried, and have refcount 0.
-    void Delete(int nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void Delete(NidType nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Clear a position in a "new" table. This is the only place where entries
     //! are actually deleted.
     void ClearNew(int nUBucket, int nUBucketPos) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Mark an entry "good", possibly moving it from "new" to "tried".
-    void Good_(const CService &addr, bool test_before_evict, int64_t time)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void Good_(const CService &addr, bool test_before_evict, int64_t time) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Add an entry to the "new" table.
-    bool Add_(const CAddress &addr, const CNetAddr &source,
-              int64_t nTimePenalty) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    bool Add_(const CAddress &addr, const CNetAddr &source, int64_t nTimePenalty) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Mark an entry as attempted to connect.
-    void Attempt_(const CService &addr, bool fCountFailure, int64_t nTime)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void Attempt_(const CService &addr, bool fCountFailure, int64_t nTime) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Select an address to connect to, if newOnly is set to true, only the new
     //! table is selected from.
@@ -283,12 +310,10 @@ protected:
     void GetAddr_(std::vector<CAddress> &vAddr, size_t max_addresses, size_t max_pct) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Mark an entry as currently-connected-to.
-    void Connected_(const CService &addr, int64_t nTime)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void Connected_(const CService &addr, int64_t nTime) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Update an entry's service bits.
-    void SetServices_(const CService &addr, ServiceFlags nServices)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void SetServices_(const CService &addr, ServiceFlags nServices) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
 public:
     //! Serialization versions.
@@ -364,39 +389,40 @@ public:
 
         int nUBuckets = ADDRMAN_NEW_BUCKET_COUNT ^ (1 << 30);
         s << nUBuckets;
-        std::map<int, int> mapUnkIds;
+        std::map<NidType, int> mapUnkIds;
         int nIds = 0;
-        for (const auto &entry : mapInfo) {
-            mapUnkIds[entry.first] = nIds;
-            const CAddrInfo &info = entry.second;
+        for (const auto & [nId, info] : mapInfo) {
+            mapUnkIds[nId] = nIds;
             if (info.nRefCount) {
                 // this means nNew was wrong, oh ow
                 assert(nIds != nNew);
                 s << info;
-                nIds++;
+                ++nIds;
             }
         }
         nIds = 0;
-        for (const auto &entry : mapInfo) {
-            const CAddrInfo &info = entry.second;
+        for (const auto & [_, info] : mapInfo) {
             if (info.fInTried) {
                 // this means nTried was wrong, oh ow
                 assert(nIds != nTried);
                 s << info;
-                nIds++;
+                ++nIds;
             }
         }
-        for (int bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; bucket++) {
+        std::vector<NidType> bucketValidNids;
+        bucketValidNids.reserve(ADDRMAN_BUCKET_SIZE);
+        for (size_t bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; ++bucket, bucketValidNids.clear()) {
             int nSize = 0;
-            for (int i = 0; i < ADDRMAN_BUCKET_SIZE; i++) {
-                if (vvNew[bucket][i] != -1) nSize++;
+            for (size_t i = 0; i < ADDRMAN_BUCKET_SIZE; ++i) {
+                if (const NidType & nId = vvNew[bucket][i]; nId.IsValid()) {
+                    ++nSize;
+                    bucketValidNids.push_back(nId);
+                }
             }
             s << nSize;
-            for (int i = 0; i < ADDRMAN_BUCKET_SIZE; i++) {
-                if (vvNew[bucket][i] != -1) {
-                    int nIndex = mapUnkIds[vvNew[bucket][i]];
-                    s << nIndex;
-                }
+            for (const auto & nId : bucketValidNids) {
+                const int nIndex = mapUnkIds[nId];
+                s << nIndex;
             }
         }
         // Store asmap version after bucket entries so that it
@@ -437,8 +463,7 @@ public:
         uint8_t nKeySize;
         s >> nKeySize;
         if (nKeySize != 32) {
-            throw std::ios_base::failure(
-                "Incorrect keysize in addrman deserialization");
+            throw std::ios_base::failure("Incorrect keysize in addrman deserialization");
         }
 
         s >> nKey;
@@ -450,58 +475,55 @@ public:
             nUBuckets ^= (1 << 30);
         }
 
-        if (nNew > ADDRMAN_NEW_BUCKET_COUNT * ADDRMAN_BUCKET_SIZE) {
-            throw std::ios_base::failure(
-                "Corrupt CAddrMan serialization, nNew exceeds limit.");
+        if (nNew < 0 || nNew > ADDRMAN_NEW_BUCKET_COUNT * ADDRMAN_BUCKET_SIZE) {
+            throw std::ios_base::failure("Corrupt CAddrMan serialization, nNew exceeds limit.");
         }
 
-        if (nTried > ADDRMAN_TRIED_BUCKET_COUNT * ADDRMAN_BUCKET_SIZE) {
-            throw std::ios_base::failure(
-                "Corrupt CAddrMan serialization, nTried exceeds limit.");
+        if (nTried < 0 || nTried > ADDRMAN_TRIED_BUCKET_COUNT * ADDRMAN_BUCKET_SIZE) {
+            throw std::ios_base::failure("Corrupt CAddrMan serialization, nTried exceeds limit.");
         }
 
         // Deserialize entries from the new table.
-        for (int n = 0; n < nNew; n++) {
+        for (NidType n{0}; n.Get() < static_cast<int64_t>(nNew); ++n) {
             CAddrInfo &info = mapInfo[n];
             s >> info;
             mapAddr[info] = n;
             info.nRandomPos = vRandom.size();
             vRandom.push_back(n);
         }
-        nIdCount = nNew;
+        nIdCount.Set(nNew);
 
         // Deserialize entries from the tried table.
         int nLost = 0;
-        for (int n = 0; n < nTried; n++) {
+        for (int n = 0; n < nTried; ++n) {
             CAddrInfo info;
             s >> info;
             int nKBucket = info.GetTriedBucket(nKey, m_asmap);
             int nKBucketPos = info.GetBucketPosition(nKey, false, nKBucket);
-            if (vvTried[nKBucket][nKBucketPos] == -1) {
+            if (info.IsValid() && ! vvTried[nKBucket][nKBucketPos].IsValid()) {
                 info.nRandomPos = vRandom.size();
                 info.fInTried = true;
                 vRandom.push_back(nIdCount);
                 mapInfo[nIdCount] = info;
                 mapAddr[info] = nIdCount;
-                vvTried[nKBucket][nKBucketPos] = nIdCount;
-                nIdCount++;
+                vvTried[nKBucket][nKBucketPos] = nIdCount++;
             } else {
-                nLost++;
+                ++nLost;
             }
         }
         nTried -= nLost;
 
         // Store positions in the new table buckets to apply later (if possible).
-        std::map<int, int> entryToBucket; // Represents which entry belonged to which bucket when serializing
+        std::map<NidType, int> entryToBucket; // Represents which entry belonged to which bucket when serializing
 
-        for (int bucket = 0; bucket < nUBuckets; bucket++) {
+        for (int bucket = 0; bucket < nUBuckets; ++bucket) {
             int nSize = 0;
             s >> nSize;
-            for (int n = 0; n < nSize; n++) {
+            for (int n = 0; n < nSize; ++n) {
                 int nIndex = 0;
                 s >> nIndex;
                 if (nIndex >= 0 && nIndex < nNew) {
-                    entryToBucket[nIndex] = bucket;
+                    entryToBucket[NidType{static_cast<int64_t>(nIndex)}] = bucket;
                 }
             }
         }
@@ -516,12 +538,12 @@ public:
         }
         const bool asmap_versions_equal = supplied_asmap_version == serialized_asmap_version;
 
-        for (int n = 0; n < nNew; n++) {
+        for (NidType n{0}; n.Get() < static_cast<int64_t>(nNew); ++n) {
             CAddrInfo &info = mapInfo[n];
             int bucket = entryToBucket[n];
             int nUBucketPos = info.GetBucketPosition(nKey, true, bucket);
-            if (format >= Format::V2_ASMAP && nUBuckets == ADDRMAN_NEW_BUCKET_COUNT && vvNew[bucket][nUBucketPos] == -1 &&
-                info.nRefCount < ADDRMAN_NEW_BUCKETS_PER_ADDRESS && asmap_versions_equal) {
+            if (format >= Format::V2_ASMAP && nUBuckets == ADDRMAN_NEW_BUCKET_COUNT && ! vvNew[bucket][nUBucketPos].IsValid()
+                && info.nRefCount < ADDRMAN_NEW_BUCKETS_PER_ADDRESS && asmap_versions_equal) {
                 // Bucketing has not changed, using existing bucket positions for the new table
                 vvNew[bucket][nUBucketPos] = n;
                 info.nRefCount++;
@@ -531,7 +553,7 @@ public:
                 LogPrint(BCLog::ADDRMAN, "Bucketing method was updated, re-bucketing addrman entries from disk\n");
                 bucket = info.GetNewBucket(nKey, m_asmap);
                 nUBucketPos = info.GetBucketPosition(nKey, true, bucket);
-                if (vvNew[bucket][nUBucketPos] == -1) {
+                if (! vvNew[bucket][nUBucketPos].IsValid()) {
                     vvNew[bucket][nUBucketPos] = n;
                     info.nRefCount++;
                 }
@@ -540,20 +562,16 @@ public:
 
         // Prune new entries with refcount 0 (as a result of collisions).
         int nLostUnk = 0;
-        for (std::map<int, CAddrInfo>::const_iterator it = mapInfo.begin();
-             it != mapInfo.end();) {
+        for (auto it = std::as_const(mapInfo).begin(); it != mapInfo.end();) {
             if (it->second.fInTried == false && it->second.nRefCount == 0) {
-                std::map<int, CAddrInfo>::const_iterator itCopy = it++;
-                Delete(itCopy->first);
-                nLostUnk++;
+                Delete(it++->first);
+                ++nLostUnk;
             } else {
-                it++;
+                ++it;
             }
         }
         if (nLost + nLostUnk > 0) {
-            LogPrint(BCLog::ADDRMAN,
-                     "addrman lost %i new and %i tried addresses due to "
-                     "collisions\n",
+            LogPrint(BCLog::ADDRMAN, "addrman lost %i new and %i tried addresses due to collisions\n",
                      nLostUnk, nLost);
         }
 
@@ -562,20 +580,20 @@ public:
 
     void Clear() {
         LOCK(cs);
-        std::vector<int>().swap(vRandom);
+        std::vector<NidType>().swap(vRandom); // done this way to ensure release of vRandom's allocated capacity
         insecure_rand.rand256(nKey);
-        for (size_t bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; bucket++) {
-            for (size_t entry = 0; entry < ADDRMAN_BUCKET_SIZE; entry++) {
-                vvNew[bucket][entry] = -1;
+        for (size_t bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; ++bucket) {
+            for (size_t entry = 0; entry < ADDRMAN_BUCKET_SIZE; ++entry) {
+                vvNew[bucket][entry].SetInvalid();
             }
         }
-        for (size_t bucket = 0; bucket < ADDRMAN_TRIED_BUCKET_COUNT; bucket++) {
-            for (size_t entry = 0; entry < ADDRMAN_BUCKET_SIZE; entry++) {
-                vvTried[bucket][entry] = -1;
+        for (size_t bucket = 0; bucket < ADDRMAN_TRIED_BUCKET_COUNT; ++bucket) {
+            for (size_t entry = 0; entry < ADDRMAN_BUCKET_SIZE; ++entry) {
+                vvTried[bucket][entry].SetInvalid();
             }
         }
 
-        nIdCount = 0;
+        nIdCount.Set(0);
         nTried = 0;
         nNew = 0;
         // Initially at 1 so that "never" is strictly worse.
@@ -642,8 +660,7 @@ public:
     }
 
     //! Mark an entry as accessible.
-    void Good(const CService &addr, bool test_before_evict = true,
-              int64_t nTime = GetAdjustedTime()) {
+    void Good(const CService &addr, bool test_before_evict = true, int64_t nTime = GetAdjustedTime()) {
         LOCK(cs);
         Check();
         Good_(addr, test_before_evict, nTime);
@@ -651,8 +668,7 @@ public:
     }
 
     //! Mark an entry as connection attempted to.
-    void Attempt(const CService &addr, bool fCountFailure,
-                 int64_t nTime = GetAdjustedTime()) {
+    void Attempt(const CService &addr, bool fCountFailure, int64_t nTime = GetAdjustedTime()) {
         LOCK(cs);
         Check();
         Attempt_(addr, fCountFailure, nTime);

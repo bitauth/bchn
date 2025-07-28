@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2023 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -815,8 +815,8 @@ public:
     // Inventory based relay.
     CRollingBloomFilter filterInventoryKnown GUARDED_BY(cs_inventory);
     // Set of transaction ids we still have to announce. They are sorted by the
-    // mempool before relay, so the order is not important.
-    std::set<TxId> setInventoryTxToSend GUARDED_BY(cs_inventory);
+    // mempool acceptance order (topological ordering).
+    std::set<std::pair<uint64_t /* EntryId */, TxId>> setInventoryTxToSendTopoSorted GUARDED_BY(cs_inventory);
     // List of block ids we still have announce. There is no final sorting
     // before sending, as they are always sent immediately and in the order
     // requested.
@@ -939,12 +939,12 @@ public:
         filterInventoryKnown.insert(inv.hash);
     }
 
-    void PushInventory(const CInv &inv) {
+    void PushInventory(const CInv &inv, uint64_t entryId = 0 /* topo sort, MSG_TX only */) {
         LOCK(cs_inventory);
         if (inv.type == MSG_TX) {
             // inv.hash is a TxId
             if (!filterInventoryKnown.contains(inv.hash)) {
-                setInventoryTxToSend.emplace(inv.hash);
+                setInventoryTxToSendTopoSorted.emplace(entryId, inv.hash);
             }
         } else if (inv.type == MSG_BLOCK) {
             // inv.hash is a BlockHash

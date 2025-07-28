@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2024 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -1678,11 +1678,10 @@ static UniValue getchaintips(const Config &config,
     std::set<const CBlockIndex *> setOrphans;
     std::set<const CBlockIndex *> setPrevs;
 
-    for (const std::pair<const BlockHash, CBlockIndex *> &item :
-         mapBlockIndex) {
-        if (!::ChainActive().Contains(item.second)) {
-            setOrphans.insert(item.second);
-            setPrevs.insert(item.second->pprev);
+    for (const auto & [_, index] : mapBlockIndex) {
+        if (!::ChainActive().Contains(&index)) {
+            setOrphans.insert(&index);
+            setPrevs.insert(index.pprev);
         }
     }
 
@@ -1924,11 +1923,12 @@ UniValue parkblock(const Config &config, const JSONRPCRequest &request) {
     CBlockIndex *pblockindex;
     {
         LOCK(cs_main);
-        if (mapBlockIndex.count(hash) == 0) {
+        auto it = mapBlockIndex.find(hash);
+        if (it == mapBlockIndex.end()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
 
-        pblockindex = mapBlockIndex[hash];
+        pblockindex = &it->second;
     }
     ParkBlock(config, state, pblockindex);
 
@@ -2002,11 +2002,12 @@ UniValue unparkblock(const Config &config, const JSONRPCRequest &request) {
 
     {
         LOCK(cs_main);
-        if (mapBlockIndex.count(hash) == 0) {
+        auto it = mapBlockIndex.find(hash);
+        if (it == mapBlockIndex.end()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
 
-        CBlockIndex *pblockindex = mapBlockIndex[hash];
+        CBlockIndex *pblockindex = &it->second;
         UnparkBlockAndChildren(pblockindex);
     }
 
@@ -2097,7 +2098,8 @@ static UniValue getchaintxstats(const Config &config,
         pindex->GetAncestor(pindex->nHeight - blockcount);
     int nTimeDiff =
         pindex->GetMedianTimePast() - pindexPast->GetMedianTimePast();
-    int nTxDiff = pindex->GetChainTxCount() - pindexPast->GetChainTxCount();
+    const int64_t nTxDiff = static_cast<int64_t>(pindex->GetChainTxCount())
+                            - static_cast<int64_t>(pindexPast->GetChainTxCount());
 
     UniValue::Object ret;
     ret.reserve(blockcount > 0 ? nTimeDiff > 0 ? 7 : 6 : 4);

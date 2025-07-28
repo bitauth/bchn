@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -391,7 +391,8 @@ void PruneBlockFilesManual(int nManualPruneHeight);
 bool AcceptToMemoryPool(const Config &config, CTxMemPool &pool,
                         CValidationState &state, const CTransactionRef &tx,
                         bool *pfMissingInputs, bool bypass_limits,
-                        const Amount nAbsurdFee, bool test_accept = false)
+                        const Amount nAbsurdFee, bool test_accept = false,
+                        uint64_t *pEntryId = nullptr)
     EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
@@ -403,7 +404,7 @@ AcceptToMemoryPoolWithTime(const Config &config, CTxMemPool &pool,
                            CValidationState &state, const CTransactionRef &tx,
                            bool *pfMissingInputs, int64_t nAcceptTime,
                            bool bypass_limits, const Amount nAbsurdFee,
-                           bool test_accept = false)
+                           bool test_accept = false, uint64_t *pEntryId = nullptr)
     EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Convert CValidationState to a human-readable message for logging */

@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 The Bitcoin developers
+// Copyright (c) 2019-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <rpc/blockchain.h>
@@ -10,6 +10,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <cstdlib>
+#include <memory>
 
 /**
  * Equality between doubles is imprecise. Comparison should be done
@@ -19,8 +20,10 @@ static bool DoubleEquals(double a, double b, double epsilon) {
     return std::abs(a - b) < epsilon;
 }
 
-static CBlockIndex *CreateBlockIndexWithNbits(uint32_t nbits) {
-    CBlockIndex *block_index = new CBlockIndex();
+using CBlockIndexPtr = std::unique_ptr<CBlockIndex>;
+
+static CBlockIndexPtr CreateBlockIndexWithNbits(uint32_t nbits) {
+    CBlockIndexPtr block_index = std::make_unique<CBlockIndex>();
     block_index->nHeight = 46367;
     block_index->nTime = 1269211443;
     block_index->nBits = nbits;
@@ -40,9 +43,8 @@ static void RejectDifficultyMismatch(double difficulty,
  * verify that the expected difficulty results.
  */
 static void TestDifficulty(uint32_t nbits, double expected_difficulty) {
-    CBlockIndex *block_index = CreateBlockIndexWithNbits(nbits);
-    double difficulty = GetDifficulty(block_index);
-    delete block_index;
+    CBlockIndexPtr block_index = CreateBlockIndexWithNbits(nbits);
+    double difficulty = GetDifficulty(block_index.get());
 
     RejectDifficultyMismatch(difficulty, expected_difficulty);
 }

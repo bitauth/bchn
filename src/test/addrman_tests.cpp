@@ -1,5 +1,5 @@
 // Copyright (c) 2012-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <addrman.h>
@@ -35,18 +35,17 @@ public:
         insecure_rand = FastRandomContext(true);
     }
 
-    CAddrInfo *Find(const CNetAddr &addr, int *pnId = nullptr) {
+    CAddrInfo *Find(const CNetAddr &addr, NidType *pnId = nullptr) {
         LOCK(cs);
         return CAddrMan::Find(addr, pnId);
     }
 
-    CAddrInfo *Create(const CAddress &addr, const CNetAddr &addrSource,
-                      int *pnId = nullptr) {
+    CAddrInfo *Create(const CAddress &addr, const CNetAddr &addrSource, NidType *pnId = nullptr) {
         LOCK(cs);
         return CAddrMan::Create(addr, addrSource, pnId);
     }
 
-    void Delete(int nId) {
+    void Delete(NidType const nId) {
         LOCK(cs);
         CAddrMan::Delete(nId);
     }
@@ -54,7 +53,7 @@ public:
     // Used to test deserialization
     std::pair<int, int> GetBucketAndEntry(const CAddress &addr) {
         LOCK(cs);
-        int nId = mapAddr[addr];
+        const NidType nId = mapAddr[addr];
         for (int bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; ++bucket) {
             for (int entry = 0; entry < ADDRMAN_BUCKET_SIZE; ++entry) {
                 if (nId == vvNew[bucket][entry]) {
@@ -335,7 +334,7 @@ BOOST_AUTO_TEST_CASE(addrman_create) {
     CAddress addr1 = CAddress(ResolveService("250.1.2.1", 8333), NODE_NONE);
     CNetAddr source1 = ResolveIP("250.1.2.1");
 
-    int nId;
+    NidType nId;
     CAddrInfo *pinfo = addrman.Create(addr1, source1, &nId);
 
     // Test: The result should be the same as the input addr.
@@ -353,7 +352,7 @@ BOOST_AUTO_TEST_CASE(addrman_delete) {
     CAddress addr1 = CAddress(ResolveService("250.1.2.1", 8333), NODE_NONE);
     CNetAddr source1 = ResolveIP("250.1.2.1");
 
-    int nId;
+    NidType nId;
     addrman.Create(addr1, source1, &nId);
 
     // Test: Delete should actually delete the addr.

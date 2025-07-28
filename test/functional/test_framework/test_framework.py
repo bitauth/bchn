@@ -131,9 +131,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                             help="Attach a python debugger if test fails")
         parser.add_argument("--usecli", dest="usecli", default=False, action="store_true",
                             help="use bitcoin-cli instead of RPC for all commands")
-        parser.add_argument("--with-upgrade11activation", dest="upgrade11activation", default=False,
-                            action="store_true",
-                            help="Activate May 2025 (upgrade 11) update on timestamp {}".format(TIMESTAMP_IN_THE_PAST))
         parser.add_argument("--with-upgrade12activation", dest="upgrade12activation", default=False,
                             action="store_true",
                             help="Activate May 2026 (upgrade 12) update on timestamp {}".format(TIMESTAMP_IN_THE_PAST))
@@ -353,9 +350,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                 use_cli=self.options.usecli,
                 emulator=self.options.emulator,
             ))
-            if self.options.upgrade11activation:
-                self.nodes[i].extend_default_args(
-                    ["-upgrade11activationtime={}".format(TIMESTAMP_IN_THE_PAST)])
             if self.options.upgrade12activation:
                 self.nodes[i].extend_default_args(
                     ["-upgrade12activationtime={}".format(TIMESTAMP_IN_THE_PAST), "-expire=0"])

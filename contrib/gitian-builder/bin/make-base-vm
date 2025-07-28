@@ -147,7 +147,7 @@ if [ $DISTRO = "debian" ]; then
   LOCALE_PKG=locales
 fi
 
-addpkg=pciutils,build-essential,git,subversion,$LOCALE_PKG,wget,lsb-release
+addpkg=pciutils,build-essential,git,subversion,$LOCALE_PKG,wget,lsb-release,sudo,gnupg
 
 if [ $DISTRO = "ubuntu" ]; then
   # Need comma at end to work around an issue with apt for Debian <= Wheezy regarding empty strings
@@ -171,9 +171,6 @@ fi
 
 if [ $LXC = "1" ]; then
   addpkg=$addpkg,lxc
-  if [ $DISTRO = "debian" ]; then
-    addpkg=$addpkg,sudo
-  fi
 else
   # Lack of comma after KERNEL_PKG is not a typo
   addpkg=$addpkg,${KERNEL_PKG}${GRUB_PKG},openssh-server
@@ -196,12 +193,21 @@ if [ $DOCKER = "1" ]; then
     base_image="$DISTRO:$SUITE"
   fi
 
+  if [ $(uname) != "Darwin" ]; then
+    CACHELINE=$(cat << EOF0
+RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
+EOF0
+)
+  else
+    # MacOS, no local debian cache
+    CACHELINE=""
+  fi
   # Generate the dockerfile
   cat << EOF > $OUT.Dockerfile
 FROM $base_image
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
+$CACHELINE
 RUN apt-get update && apt-get --no-install-recommends -y install $addpkg
 
 RUN useradd -ms /bin/bash -U $DISTRO

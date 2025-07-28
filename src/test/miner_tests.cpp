@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2023 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -480,23 +480,21 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity) {
     // Sequence locks fail.
     BOOST_CHECK(!TestSequenceLocks(CTransaction(tx), flags));
 
-    for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++) {
+    for (size_t i = 0; i < CBlockIndex::nMedianTimeSpan; ++i) {
         // Trick the MedianTimePast.
-        ::ChainActive()
-            .Tip()
-            ->GetAncestor(::ChainActive().Tip()->nHeight - i)
-            ->nTime += 512;
+        CBlockIndex * const pindex = ::ChainActive().Tip()->GetAncestor(::ChainActive().Tip()->nHeight - i);
+        pindex->nTime += 512;
+        pindex->ClearCachedMTPValue();
     }
     // Sequence locks pass 512 seconds later.
     BOOST_CHECK(
         SequenceLocks(CTransaction(tx), flags, &prevheights,
                       *CreateBlockIndex(::ChainActive().Tip()->nHeight + 1)));
-    for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++) {
+    for (size_t i = 0; i < CBlockIndex::nMedianTimeSpan; ++i) {
         // Undo tricked MTP.
-        ::ChainActive()
-            .Tip()
-            ->GetAncestor(::ChainActive().Tip()->nHeight - i)
-            ->nTime -= 512;
+        CBlockIndex * const pindex = ::ChainActive().Tip()->GetAncestor(::ChainActive().Tip()->nHeight - i);
+        pindex->nTime -= 512;
+        pindex->ClearCachedMTPValue();
     }
 
     // Absolute height locked.
@@ -592,12 +590,11 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity) {
     BOOST_CHECK_EQUAL(pblocktemplate->block.vtx.size(), 3UL);
     // However if we advance height by 1 and time by 512, all of them should be
     // mined.
-    for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++) {
+    for (size_t i = 0; i < CBlockIndex::nMedianTimeSpan; ++i) {
         // Trick the MedianTimePast.
-        ::ChainActive()
-            .Tip()
-            ->GetAncestor(::ChainActive().Tip()->nHeight - i)
-            ->nTime += 512;
+        CBlockIndex * const pindex = ::ChainActive().Tip()->GetAncestor(::ChainActive().Tip()->nHeight - i);
+        pindex->nTime += 512;
+        pindex->ClearCachedMTPValue();
     }
     ::ChainActive().Tip()->nHeight++;
     SetMockTime(::ChainActive().Tip()->GetMedianTimePast() + 1);

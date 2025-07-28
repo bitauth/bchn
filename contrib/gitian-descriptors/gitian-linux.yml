@@ -1,9 +1,9 @@
 ---
 name: "bitcoin-cash-node-linux"
 enable_cache: true
-distro: "debian"
+distro: "ubuntu"
 suites:
-- "buster"
+- "jammy"
 architectures:
 - "amd64"
 packages:

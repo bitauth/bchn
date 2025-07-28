@@ -1,12 +1,12 @@
 # Setting up Debian for Gitian building
 
-In this section we will be setting up the Debian installation for Gitian building.
+In this section we will be setting up the Debian 12 installation for Gitian building.
 We assume that a user `gitianuser` with sudo privileges was previously added.
 
 First we need to set up dependencies. Type/paste the following in the terminal:
 
 ```bash
-sudo apt-get install git ruby apt-cacher-ng qemu-utils debootstrap lxc python-cheetah parted kpartx bridge-utils make ubuntu-archive-keyring curl firewalld apparmor iptables
+sudo apt-get install git ruby apt-cacher-ng qemu-utils debootstrap lxc python3-cheetah parted kpartx bridge-utils make debian-ports-archive-keyring debian-keyring curl firewalld apparmor iptables
 ```
 
 Find the device name of your network card. You can list your connections with
@@ -58,20 +58,6 @@ section only need to be performed once.
 Re-login as the user `gitianuser` that was created during installation.
 The rest of the steps in this guide will be performed as that user.
 
-There is no `python-vm-builder` package in Debian, so we need to install it from source ourselves,
-
-```bash
-wget http://archive.ubuntu.com/ubuntu/pool/universe/v/vm-builder/vm-builder_0.12.4+bzr494.orig.tar.gz
-echo "76cbf8c52c391160b2641e7120dbade5afded713afaa6032f733a261f13e6a8e  vm-builder_0.12.4+bzr494.orig.tar.gz" | sha256sum -c
-# (verification -- must return OK)
-tar -zxvf vm-builder_0.12.4+bzr494.orig.tar.gz
-cd vm-builder-0.12.4+bzr494
-sudo python setup.py install
-cd ..
-```
-
-**Note**: When sudo asks for a password, enter the password for the user `gitianuser` not for `root`.
-
 Clone the git repositories for Bitcoin Cash Node and copy `gitian-builder` up to the top level.
 
 ```bash
@@ -82,7 +68,7 @@ cp -fpra bitcoin-cash-node/contrib/gitian-builder .
 ## Setting up the Gitian image
 
 Gitian needs a virtual image of the operating system to build in.
-Currently this is Debian 10 Buster x86_64.
+Currently this is Ubuntu 22.04 Jammy x86_64.
 This image will be copied and used every time that a build is started to
 make sure that the build is deterministic.
 Creating the image will take a while, but only has to be done once.
@@ -91,7 +77,7 @@ Execute the following as user `gitianuser`:
 
 ```bash
 cd gitian-builder
-bin/make-base-vm --lxc --arch amd64 --distro debian --suite buster
+bin/make-base-vm --lxc --arch amd64 --distro ubuntu --suite jammy
 ```
 
 There will be a lot of warnings printed during the build of the image. These can be ignored.

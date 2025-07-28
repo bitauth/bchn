@@ -34,7 +34,7 @@ struct Upgrade9OverrideTestingSetup : LibauthTestingSetup {
         }
     }
 
-    /// Activates or deactivates upgrade 9 by setting the activation time in the past or future respectively
+    /// Activates or deactivates upgrade 9 by setting the activation height in the past or future respectively
     void SetUpgrade9Active(bool active) {
         const auto currentHeight = []{
             LOCK(cs_main);
@@ -49,31 +49,27 @@ struct Upgrade9OverrideTestingSetup : LibauthTestingSetup {
 
 /// Test fixture that can force-enable or disable upgrade 11 (vmlimits + bigint) as well as upgrade9 (cashtokens)
 struct Upgrade11OverrideTestingSetup : Upgrade9OverrideTestingSetup {
-    std::optional<std::string> optOrigArg11;
+    std::optional<int32_t> upgrade11OriginalOverride;
     bool touchedUpgrade11 = false;
 
     Upgrade11OverrideTestingSetup() {
-        if (gArgs.IsArgSet("-upgrade11activationtime")) {
-            optOrigArg11 = gArgs.GetArg("-upgrade11activationtime", "");
-        }
+        upgrade11OriginalOverride = g_Upgrade11HeightOverride;
     }
 
     ~Upgrade11OverrideTestingSetup() override {
         if (touchedUpgrade11) {
-            gArgs.ClearArg("-upgrade11activationtime");
-            if (optOrigArg11) {
-                gArgs.ForceSetArg("-upgrade11activationtime", *optOrigArg11);
-            }
+            g_Upgrade11HeightOverride = upgrade11OriginalOverride;
         }
     }
 
-    /// Activates or deactivates upgrade 11 by setting the activation time in the past or future respectively
+    /// Activates or deactivates upgrade 11 by setting the activation height in the past or future respectively
     void SetUpgrade11Active(bool active) {
-        if (active) {
-            gArgs.ForceSetArg("-upgrade11activationtime", "1000000");
-        } else {
-            gArgs.ForceSetArg("-upgrade11activationtime", "9223372036854775807");
-        }
+        const auto currentHeight = []{
+            LOCK(cs_main);
+            return ::ChainActive().Tip()->nHeight;
+        }();
+        auto activationHeight = active ? currentHeight - 1 : currentHeight + 1;
+        g_Upgrade11HeightOverride = activationHeight;
         touchedUpgrade11 = true;
     }
 };

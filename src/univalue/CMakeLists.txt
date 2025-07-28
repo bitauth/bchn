@@ -1,9 +1,9 @@
-# Copyright (c) 2017-2024 The Bitcoin developers
+# Copyright (c) 2017-2025 The Bitcoin developers
 
 cmake_minimum_required(VERSION 3.13)
 project(univalue)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(UNIVALUE_BUILD_TESTS "Build univalue's unit tests" ON)

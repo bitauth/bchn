@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2023 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -70,7 +70,8 @@ class GenericVectorWriter {
     size_t nPos;
 
     // ensure this is a vector of character-like objects
-    static_assert(std::is_pod_v<typename VecT::value_type> && sizeof(typename VecT::value_type) == 1);
+    static_assert(std::is_standard_layout_v<typename VecT::value_type> && std::is_trivial_v<typename VecT::value_type>
+                  && sizeof(typename VecT::value_type) == 1);
 
 public:
     /**
@@ -138,7 +139,8 @@ class GenericVectorReader {
     size_t m_pos = 0;
 
     // ensure this is a vector of character-like objects
-    static_assert(std::is_pod_v<typename VecT::value_type> && sizeof(typename VecT::value_type) == 1);
+    static_assert(std::is_standard_layout_v<typename VecT::value_type> && std::is_trivial_v<typename VecT::value_type>
+                  && sizeof(typename VecT::value_type) == 1);
 
 public:
     /**

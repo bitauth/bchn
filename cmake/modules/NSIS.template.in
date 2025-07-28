@@ -2,6 +2,7 @@ Name "@CPACK_NSIS_DISPLAY_NAME@"
 
 RequestExecutionLevel highest
 SetCompressor @CPACK_NSIS_COMPRESSOR@
+SetDateSave off
 
 # General Symbol Definitions
 !define REGKEY "SOFTWARE\$(^Name)"

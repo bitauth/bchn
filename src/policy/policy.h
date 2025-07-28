@@ -76,7 +76,7 @@ static constexpr unsigned int DEFAULT_MAX_MEMPOOL_SIZE_PER_MB = 10;
  */
 static constexpr CFeeRate MEMPOOL_FULL_FEE_INCREMENT(1000 * SATOSHI);
 /**
- * Default for -bytespersigocheck.
+ * Default for -bytespersigcheck.
  */
 static constexpr unsigned int DEFAULT_BYTES_PER_SIGCHECK = 50;
 /**

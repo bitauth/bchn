@@ -39,7 +39,7 @@ Receiving objects: 100% (57959/57959), 53.76 MiB | 484.00 KiB/s, done.
 Resolving deltas: 100% (41590/41590), done.
 From https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node.git
 ... (new tags, new branch etc)
---- Building for trusty amd64 ---
+--- Building for jammy amd64 ---
 Stopping target if it is up
 Making a new image copy
 stdin: is not a tty
@@ -66,7 +66,7 @@ For example:
 
 ```bash
 URL=https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node.git
-COMMIT=v0.18.5
+COMMIT=v28.0.1
 ./bin/gbuild --commit bitcoin=${COMMIT} --url bitcoin=${URL} ../bitcoin-cash-node/contrib/gitian-descriptors/gitian-linux.yml
 ./bin/gbuild --commit bitcoin=${COMMIT} --url bitcoin=${URL} ../bitcoin-cash-node/contrib/gitian-descriptors/gitian-win.yml
 ./bin/gbuild --commit bitcoin=${COMMIT} --url bitcoin=${URL} ../bitcoin-cash-node/contrib/gitian-descriptors/gitian-osx.yml
@@ -90,15 +90,15 @@ So, if you use LXC:
 export PATH="$PATH":${HOME}/gitian-builder/libexec
 export USE_LXC=1
 cd ~/gitian-builder
-./libexec/make-clean-vm --suite buster --arch amd64
+./libexec/make-clean-vm --suite jammy --arch amd64
 
-LXC_ARCH=amd64 LXC_SUITE=buster on-target -u root dpkg --add-architecture i386
-LXC_ARCH=amd64 LXC_SUITE=buster on-target -u root apt-get update
-LXC_ARCH=amd64 LXC_SUITE=buster on-target -u root \
+LXC_ARCH=amd64 LXC_SUITE=jammy on-target -u root dpkg --add-architecture i386
+LXC_ARCH=amd64 LXC_SUITE=jammy on-target -u root apt-get update
+LXC_ARCH=amd64 LXC_SUITE=jammy on-target -u root \
   -e DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -y install \
   $( sed -ne '/^packages:/,/^[^-]/ {/^- .*/{s/"//g;s/- //;p}}' ../bitcoin-cash-node/contrib/gitian-descriptors/*|sort|uniq )
-LXC_ARCH=amd64 LXC_SUITE=buster on-target -u root apt-get -q -y purge grub
-LXC_ARCH=amd64 LXC_SUITE=buster on-target -u root -e DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+LXC_ARCH=amd64 LXC_SUITE=jammy on-target -u root apt-get -q -y purge grub
+LXC_ARCH=amd64 LXC_SUITE=jammy on-target -u root -e DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
 ```
 
 And then set offline mode for apt-cacher-ng:

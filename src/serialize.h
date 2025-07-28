@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2023 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -1005,12 +1005,12 @@ void Serialize(Stream &os, const std::map<K, T, Pred, A> &m) {
 template <typename Stream, typename K, typename T, typename Pred, typename A>
 void Unserialize(Stream &is, std::map<K, T, Pred, A> &m) {
     m.clear();
-    size_t nSize = ReadCompactSize(is);
-    typename std::map<K, T, Pred, A>::iterator mi = m.begin();
-    for (size_t i = 0; i < nSize; i++) {
+    const size_t nSize = ReadCompactSize(is);
+    auto it = m.begin();
+    for (size_t i = 0; i < nSize; ++i) {
         std::pair<K, T> item;
         Unserialize(is, item);
-        mi = m.insert(mi, item);
+        it = m.insert(it, std::move(item));
     }
 }
 
@@ -1028,12 +1028,12 @@ void Serialize(Stream &os, const std::set<K, Pred, A> &m) {
 template <typename Stream, typename K, typename Pred, typename A>
 void Unserialize(Stream &is, std::set<K, Pred, A> &m) {
     m.clear();
-    size_t nSize = ReadCompactSize(is);
-    typename std::set<K, Pred, A>::iterator it = m.begin();
-    for (size_t i = 0; i < nSize; i++) {
+    const size_t nSize = ReadCompactSize(is);
+    auto it = m.begin();
+    for (size_t i = 0; i < nSize; ++i) {
         K key;
         Unserialize(is, key);
-        it = m.insert(it, key);
+        it = m.insert(it, std::move(key));
     }
 }
 

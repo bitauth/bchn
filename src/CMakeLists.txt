@@ -2,7 +2,7 @@
 
 project(bitcoind)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -452,7 +452,7 @@ endfunction(prepend)
 
 prepend(BOOST_LIBRARIES "Boost::" ${BOOST_PACKAGES_REQUIRED})
 
-find_package(Boost 1.58 REQUIRED ${BOOST_PACKAGES_REQUIRED})
+find_package(Boost 1.73 REQUIRED ${BOOST_PACKAGES_REQUIRED})
 target_link_libraries(util univalue crypto ${BOOST_LIBRARIES})
 
 # Make sure boost uses std::atomic (it doesn't before 1.63)

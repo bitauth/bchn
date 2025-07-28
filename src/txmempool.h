@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2023 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -28,7 +28,6 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -212,13 +211,16 @@ struct TxMempoolInfo {
     CTransactionRef tx;
 
     /** Time the transaction entered the mempool. */
-    int64_t nTime;
+    int64_t nTime{};
 
     /** Feerate of the transaction. */
     CFeeRate feeRate;
 
     /** The fee delta. */
     Amount nFeeDelta;
+
+    /** The EntryId (mempool acceptance order), higher is later; for topological sort order */
+    uint64_t entryId{};
 };
 
 /**
@@ -527,11 +529,11 @@ public:
     }
 
     // addUnchecked must update state for all parents of a given transaction,
-    // updating child links as necessary.
-    void addUnchecked(CTxMemPoolEntry &&entry) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main);
+    // updating child links as necessary. Returns the EntryId (acceptance order) for this entry.
+    uint64_t addUnchecked(CTxMemPoolEntry &&entry) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main);
     // This overload of addUnchecked is provided for convenience, but critical paths should use the above version.
-    void addUnchecked(const CTxMemPoolEntry &entry) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main) {
-        addUnchecked(CTxMemPoolEntry{entry});
+    uint64_t addUnchecked(const CTxMemPoolEntry &entry) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main) {
+        return addUnchecked(CTxMemPoolEntry{entry});
     }
 
     void removeRecursive(
@@ -543,7 +545,6 @@ public:
     void clear(bool clearDspOrphans = true);
     // lock free
     void _clear(bool clearDspOrphans = true) EXCLUSIVE_LOCKS_REQUIRED(cs);
-    bool CompareTopologically(const TxId &txida, const TxId &txidb) const;
     void queryHashes(std::vector<uint256> &vtxid) const;
     bool isSpent(const COutPoint &outpoint) const;
     unsigned int GetTransactionsUpdated() const;

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2018 The Bitcoin Core developers
-// Copyright (c) 2020-2022 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,7 +18,7 @@ bool PartiallySignedTransaction::IsNull() const {
 
 bool PartiallySignedTransaction::Merge(const PartiallySignedTransaction &psbt) {
     // Prohibited to merge two PSBTs over different transactions
-    if (tx->GetId() != psbt.tx->GetId()) {
+    if (tx.value().GetId() != psbt.tx.value().GetId()) {
         return false;
     }
 
@@ -146,7 +146,7 @@ bool SignPSBTInput(const SigningProvider &provider,
                    PartiallySignedTransaction &psbt, int index, const uint32_t scriptFlags,
                    SigHashType sighash, const ScriptExecutionContextOpt &optContext) {
     PSBTInput &input = psbt.inputs.at(index);
-    const CMutableTransaction &tx = *psbt.tx;
+    const CMutableTransaction &tx = psbt.tx.value();
 
     if (PSBTInputSigned(input)) {
         return true;

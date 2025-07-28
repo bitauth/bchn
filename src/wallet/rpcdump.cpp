@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2024 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -908,7 +908,7 @@ UniValue dumpwallet(const Config &config, const JSONRPCRequest &request) {
     // sort time/key pairs
     std::vector<std::pair<int64_t, CKeyID>> vKeyBirth;
     for (const auto &entry : mapKeyBirth) {
-        if (const CKeyID *keyID = boost::get<CKeyID>(&entry.first)) {
+        if (const CKeyID *keyID = std::get_if<CKeyID>(&entry.first)) {
             // set and test
             vKeyBirth.push_back(std::make_pair(entry.second, *keyID));
         }

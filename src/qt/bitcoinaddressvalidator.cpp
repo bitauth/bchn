@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2014 The Bitcoin Core developers
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -140,7 +140,7 @@ bool BitcoinAddressCheckValidator::GetLegacyAddressUseAuth(const CTxDestination 
     QSettings settings;
     LegacyAddressType addressType = LegacyAddressType::P2PKH;
     bool allowed = settings.value("fAllowLegacyP2PKH").toBool();
-    if (destination.which() == 2) {
+    if (std::get_if<ScriptID>(&destination)) {
         addressType = LegacyAddressType::P2SH;
         allowed = settings.value("fAllowLegacyP2SH").toBool();
     }

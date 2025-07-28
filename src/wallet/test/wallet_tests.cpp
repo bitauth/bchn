@@ -1,5 +1,5 @@
 // Copyright (c) 2012-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2023 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -321,10 +321,10 @@ static int64_t AddTx(CWallet &wallet, uint32_t lockTime, int64_t mockTime,
         LockAnnotation lock(::cs_main);
         auto locked_chain = wallet.chain().lock();
         auto inserted =
-            mapBlockIndex.emplace(BlockHash(GetRandHash()), new CBlockIndex);
+            mapBlockIndex.try_emplace(BlockHash(GetRandHash()));
         assert(inserted.second);
         const BlockHash &hash = inserted.first->first;
-        block = inserted.first->second;
+        block = &inserted.first->second;
         block->nTime = blockTime;
         block->phashBlock = &hash;
     }
@@ -468,7 +468,7 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
         list = wallet->ListCoins(*m_locked_chain);
     }
     BOOST_CHECK_EQUAL(list.size(), 1U);
-    BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
+    BOOST_CHECK_EQUAL(std::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
     BOOST_CHECK_EQUAL(list.begin()->second.size(), 1U);
 
@@ -489,7 +489,7 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
         list = wallet->ListCoins(*m_locked_chain);
     }
     BOOST_CHECK_EQUAL(list.size(), 1U);
-    BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
+    BOOST_CHECK_EQUAL(std::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
     BOOST_CHECK_EQUAL(list.begin()->second.size(), 2U);
 
@@ -519,7 +519,7 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
         list = wallet->ListCoins(*m_locked_chain);
     }
     BOOST_CHECK_EQUAL(list.size(), 1U);
-    BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
+    BOOST_CHECK_EQUAL(std::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
     BOOST_CHECK_EQUAL(list.begin()->second.size(), 2U);
 }

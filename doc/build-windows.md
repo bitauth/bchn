@@ -9,7 +9,7 @@ be removed).
 The options known to work for building Bitcoin Cash Node on Windows are:
 
 - On Linux, using the [Mingw-w64](https://www.mingw-w64.org/downloads/) cross compiler
-  tool chain. Debian Buster is recommended and is the platform used to build the
+  tool chain. Ubuntu Jammy is recommended and is the platform used to build the
   Bitcoin Cash Node Windows release binaries.
 - On Windows, using [Windows Subsystem for Linux (WSL)](https://msdn.microsoft.com/commandline/wsl/about)
   and the Mingw-w64 cross compiler tool chain. This is covered in these notes.

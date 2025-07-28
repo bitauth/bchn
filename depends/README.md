@@ -86,7 +86,7 @@ sudo apt-get install build-essential autoconf automake cmake curl git libtool ni
 Install the following packages:
 
 ```sh
-sudo apt-get install imagemagick libbz2-dev libcap-dev librsvg2-bin libtiff-tools python3-setuptools
+sudo apt-get install imagemagick libbz2-dev libcap-dev librsvg2-bin libtiff-tools python3-setuptools clang lld llvm zip xorriso
 ```
 
 Obtain the same SDK packge that is used in the gitian build (refer to `gitian-building.md` for download instructions).

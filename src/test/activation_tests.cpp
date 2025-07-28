@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2023 The Bitcoin developers
+// Copyright (c) 2019-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -21,6 +21,7 @@ static void SetMTP(std::array<CBlockIndex, 12> &blocks, int64_t mtp) {
 
     for (size_t i = 0; i < len; ++i) {
         blocks[i].nTime = mtp + (i - (len / 2));
+        blocks[i].ClearCachedMTPValue();
     }
 
     BOOST_CHECK_EQUAL(blocks.back().GetMedianTimePast(), mtp);
@@ -171,7 +172,7 @@ BOOST_AUTO_TEST_CASE(isupgrade10enabled) {
     const auto pparams = CreateChainParams(CBaseChainParams::MAIN);
     const Consensus::Params &params = pparams->GetConsensus();
 
-           // check with no override (params.upgrade9height), and with a bunch of overrides spanning the int32 range ...
+    // check with no override (params.upgrade10height), and with a bunch of overrides spanning the int32 range ...
     for (const int32_t override : {-1, 0, 1000, 1'000'000, 1'000'000'000 }) {
         if (override < 0) {
             // no override, use consensus params
@@ -201,30 +202,38 @@ BOOST_AUTO_TEST_CASE(isupgrade10enabled) {
 }
 
 BOOST_AUTO_TEST_CASE(isupgrade11enabled) {
-    // test with no hard-coded activation height (activation based on MTP)
+    // test with hard-coded activation height, also test the upgrade height override mechanism
+    Defer d([orig_override = g_Upgrade11HeightOverride] { g_Upgrade11HeightOverride = orig_override; });
     const auto pparams = CreateChainParams(CBaseChainParams::MAIN);
     const Consensus::Params &params = pparams->GetConsensus();
-    const auto activation = gArgs.GetArg("-upgrade11activationtime", params.upgrade11ActivationTime);
-    const auto origMockTime = GetMockTime();
-    Defer d([origMockTime] { SetMockTime(origMockTime); });
-    SetMockTime(activation - 1000000);
 
-    BOOST_CHECK(!IsUpgrade11Enabled(params, nullptr));
+    // check with no override (params.upgrade11height), and with a bunch of overrides spanning the int32 range ...
+    for (const int32_t override : {-1, 0, 1000, 1'000'000, 1'000'000'000 }) {
+        if (override < 0) {
+            // no override, use consensus params
+            g_Upgrade11HeightOverride.reset();
+            BOOST_CHECK_EQUAL(GetUpgrade11ActivationHeight(params), params.upgrade11Height);
+        } else {
+            // with override
+            g_Upgrade11HeightOverride = override;
+            BOOST_CHECK_EQUAL(GetUpgrade11ActivationHeight(params), override);
+        }
+        const int32_t activation_height = GetUpgrade11ActivationHeight(params);
 
-    std::array<CBlockIndex, 12> blocks;
-    for (size_t i = 1; i < blocks.size(); ++i) {
-        blocks[i].pprev = &blocks[i - 1];
+        BOOST_CHECK(!IsUpgrade11Enabled(params, nullptr));
+
+        std::array<CBlockIndex, 4> blocks;
+        blocks[0].nHeight = activation_height - 2;
+
+        for (size_t i = 1; i < blocks.size(); ++i) {
+            blocks[i].pprev = &blocks[i - 1];
+            blocks[i].nHeight = blocks[i - 1].nHeight + 1;
+        }
+        BOOST_CHECK(!IsUpgrade11Enabled(params, &blocks[0]));
+        BOOST_CHECK(!IsUpgrade11Enabled(params, &blocks[1]));
+        BOOST_CHECK(IsUpgrade11Enabled(params, &blocks[2]));
+        BOOST_CHECK(IsUpgrade11Enabled(params, &blocks[3]));
     }
-    BOOST_CHECK(!IsUpgrade11Enabled(params, &blocks.back()));
-
-    SetMTP(blocks, activation - 1);
-    BOOST_CHECK(!IsUpgrade11Enabled(params, &blocks.back()));
-
-    SetMTP(blocks, activation);
-    BOOST_CHECK(IsUpgrade11Enabled(params, &blocks.back()));
-
-    SetMTP(blocks, activation + 1);
-    BOOST_CHECK(IsUpgrade11Enabled(params, &blocks.back()));
 }
 
 BOOST_AUTO_TEST_CASE(isupgrade12enabled) {
@@ -290,8 +299,10 @@ BOOST_AUTO_TEST_CASE(test_upgrade12_activation_block_tracking) {
 
     blocksFork[0].pprev = &blocks[6]; // fork at block 6 (1 past the activation block)
     blocksFork[0].nTime = blocksFork[0].pprev->nTime + 1;
+    blocksFork[0].ClearCachedMTPValue();
     for (size_t i = 1; i < blocksFork.size(); ++i) {
         blocksFork[i].nTime = blocksFork[i-1].nTime + 1;
+        blocksFork[i].ClearCachedMTPValue();
     }
 
     BOOST_CHECK(IsUpgrade12Enabled(params, &blocks.back()));

@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2020-2024 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -32,6 +32,7 @@
 #include <txmempool.h>
 #include <uint256.h>
 #include <undo.h>
+#include <util/check.h>
 #include <util/saltedhashers.h>
 #include <util/strencodings.h>
 #include <validation.h>
@@ -1633,7 +1634,7 @@ static UniValue decodepsbt(const Config &config,
     UniValue::Object result;
 
     // Add the decoded tx
-    result.emplace_back("tx", TxToUniv(config, CTransaction(*psbtx.tx), uint256(), false));
+    result.emplace_back("tx", TxToUniv(config, CTransaction(*CHECK_NONFATAL(psbtx.tx)), uint256(), false));
 
     // Unknown data
     if (!psbtx.unknown.empty()) {
@@ -1895,7 +1896,7 @@ static UniValue finalizepsbt(const Config &config,
         return GetMemPoolScriptFlags(config.GetChainParams().GetConsensus(), ::ChainActive().Tip());
     }();
     // Assumption: Below code does NOT push_back new inputs to psbtx.tx.
-    const auto contexts = ScriptExecutionContext::createForAllInputs(*psbtx.tx, psbtx.inputs);
+    const auto contexts = ScriptExecutionContext::createForAllInputs(*CHECK_NONFATAL(psbtx.tx), psbtx.inputs);
     for (size_t i = 0; i < psbtx.tx->vin.size(); ++i) {
         complete &=
             SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, scriptFlags, SigHashType(), contexts[i]);
@@ -1983,14 +1984,8 @@ static UniValue createpsbt(const Config &config,
     // Make a blank psbt
     PartiallySignedTransaction psbtx;
     psbtx.tx = rawTx;
-    psbtx.inputs.reserve(rawTx.vin.size());
-    for (size_t i = 0; i < rawTx.vin.size(); ++i) {
-        psbtx.inputs.push_back(PSBTInput());
-    }
-    psbtx.outputs.reserve(rawTx.vout.size());
-    for (size_t i = 0; i < rawTx.vout.size(); ++i) {
-        psbtx.outputs.push_back(PSBTOutput());
-    }
+    psbtx.inputs.resize(rawTx.vin.size(), PSBTInput());
+    psbtx.outputs.resize(rawTx.vout.size(), PSBTOutput());
 
     // Serialize the PSBT
     CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);

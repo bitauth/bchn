@@ -104,11 +104,42 @@ EOF" if build_desc["sudo"] and @options[:allow_sudo]
     end
   end
 
+  if build_desc["repositories"]
+    info "Adding repositories to the sources list (log in var/install.log)"
+    for r in build_desc["repositories"]
+      system! "on-target -u root tee -a /etc/apt/sources.list >> var/install.log 2>&1 << EOF
+#{r["source"]}
+EOF"
+      if r["keys"]
+        for k in r["keys"]
+          keyserver = k["server"]
+          recv = k["recv"].join(" ")
+          system! "on-target -u root -e DEBIAN_FRONTEND=noninteractive apt-key adv --keyserver #{keyserver} --recv-keys #{recv} >> var/install.log 2>&1"
+        end
+      end
+    end
+  end
+
   info "Updating apt-get repository (log in var/install.log)"
   system! "on-target -u root apt-get update >> var/install.log 2>&1"
 
   info "Installing additional packages (log in var/install.log)"
   system! "on-target -u root -e DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -y install #{build_desc["packages"].join(" ")} >> var/install.log 2>&1"
+
+  if build_desc["repositories"]
+    for r in build_desc["repositories"]
+      if r["packages"]
+        info "Installing additional packages from repository #{r["distribution"]} (log in var/install.log)"
+        system! "on-target -u root -e DEBIAN_FRONTEND=noninteractive apt-get -t #{r["distribution"]} --no-install-recommends -y install #{r["packages"].join(" ")} >> var/install.log 2>&1"
+      end
+      if r["postinstall"]
+        for cmd in r["postinstall"]
+          info "Running 'postinstall' command: #{cmd} (log in var/install.log)"
+          system! "on-target -u root -e DEBIAN_FRONTEND=noninteractive #{cmd} >> var/install.log 2>%1"
+        end
+      end
+    end
+  end
 
   if build_desc["alternatives"]
     info "Set alternatives (log in var/install.log)"
@@ -140,6 +171,8 @@ EOF" if build_desc["sudo"] and @options[:allow_sudo]
       script.puts "GBUILD_COMMON_CACHE=$HOME/cache/common"
     end
     script.puts "MAKEOPTS=(-j#{@options[:num_procs]})"
+    script.puts "NUM_PROCS=#{@options[:num_procs]}"
+    script.puts "NUM_MEM=#{@options[:memory]}"
     script.puts
     author_date = nil
     build_desc["remotes"].each do |remote|
@@ -204,6 +237,9 @@ OptionParser.new do |opts|
   end
   opts.on("--skip-fetch", "skip fetching the latest git objects and refs from the remote source") do |v|
     @options[:skip_fetch] = v
+  end
+  opts.on("--skip-cleanup", "skip cleaning up the target VM. this may be useful for copying additional files from the target after the build") do |v|
+    @options[:skip_cleanup] = v
   end
 end.parse!
 
@@ -299,11 +335,11 @@ build_desc["remotes"].each do |remote|
     system!("git init inputs/#{dir}")
   end
   if !@options[:skip_fetch]
-    system!("cd inputs/#{dir} && git fetch --update-head-ok #{sanitize_path(remote["url"], remote["url"])} +refs/tags/*:refs/tags/* +refs/heads/*:refs/heads/*")
-    system!("cd inputs/#{dir} && git checkout -q #{commit}")
+    system!("cd inputs/#{dir} && git fetch -f --update-head-ok #{sanitize_path(remote["url"], remote["url"])} #{commit}:refs/tags/tobuild")
+    system!("cd inputs/#{dir} && git checkout -q tobuild")
     system!("cd inputs/#{dir} && git submodule update --init --recursive --force")
   end
-  commit = `cd inputs/#{dir} && git log --format=%H -1 #{commit}`.strip
+  commit = `cd inputs/#{dir} && git log --format=%H -1 tobuild`.strip
   raise "error looking up commit for tag #{remote["commit"]}" unless $?.exitstatus == 0
   in_sums << "git:#{commit} #{dir}"
 end
@@ -330,6 +366,11 @@ suites.each do |suite|
     base_manifest = File.read("var/base-#{suite}-#{arch}.manifest")
     base_manifests["#{suite}-#{arch}"] = base_manifest
   end
+end
+
+unless @options[:skip_cleanup]
+  info "Cleaning up target"
+  system "stop-target"
 end
 
 out_dir = File.join(build_dir, "out")

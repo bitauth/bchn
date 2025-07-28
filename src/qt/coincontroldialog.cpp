@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2022 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -500,7 +500,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog *dialog) {
         CTxDestination address;
         if (ExtractDestination(out.txout.scriptPubKey, address, 0 /* no p2sh_32 */)) {
             CPubKey pubkey;
-            CKeyID *keyid = boost::get<CKeyID>(&address);
+            CKeyID *keyid = std::get_if<CKeyID>(&address);
             if (keyid && model->wallet().getPubKey(*keyid, pubkey)) {
                 nBytesInputs += (pubkey.IsCompressed() ? 148 : 180);
             } else {

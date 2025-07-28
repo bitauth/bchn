@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2023 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,6 +19,7 @@
 #include <tinyformat.h>
 #include <uint256.h>
 
+#include <atomic>
 #include <ios>
 #include <string_view>
 #include <type_traits>
@@ -82,7 +83,6 @@ public:
         LOCK(cs_ablaState);
         ablaStateOpt = s;
     }
-
 };
 
 /**
@@ -139,20 +139,19 @@ public:
     //! upon
     unsigned int nTx = 0;
 
+    //! Verification status of this block. See enum BlockStatus
+    BlockStatus nStatus = BlockStatus();
+
     //! (memory only) Number of transactions in the chain up to and including
     //! this block.
     //! This value will be non-zero only if and only if transactions for this
-    //! block and all its parents are available. Change to 64-bit type when
-    //! necessary; won't happen before 2030
-    unsigned int nChainTx = 0;
-
-    //! Verification status of this block. See enum BlockStatus
-    BlockStatus nStatus = BlockStatus();
+    //! block and all its parents are available.
+    uint64_t nChainTx = 0;
 
     //! block header
     int32_t nVersion = 0;
     uint256 hashMerkleRoot = uint256();
-    uint32_t nTime = 0;
+    uint32_t nTime = 0; ///< Note: Do not modify nTime once it is set; doing so will make cachedMTP for subsequent blocks be incorrect.
     uint32_t nBits = 0;
     uint32_t nNonce = 0;
 
@@ -166,6 +165,26 @@ public:
     //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax = 0;
 
+private:
+    //! (memory only) The cached medium time past value, lazily calculated the first time GetMedianTimePast() is called.
+    //! Change this to 64-bit when changing nTime to be 64-bit in some future upgrade before the year ~2100 or so.
+    mutable class CachedMTP {
+        static constexpr uint32_t NoValue = 0xff'ff'ff'ffu;
+        std::atomic_uint32_t val = NoValue;
+    public:
+        CachedMTP() = default;
+        CachedMTP(const CachedMTP &o) : val(o.Get().value_or(NoValue)) {}
+
+        std::optional<uint32_t> Get() const {
+            if (const uint32_t ret = val.load(std::memory_order_acquire); ret != NoValue) { return ret; }
+            return std::nullopt;
+        }
+
+        void Set(uint32_t v) { val.store(v, std::memory_order_release); }
+        void Clear() { Set(NoValue); }
+    } cachedMTP;
+
+public:
     explicit CBlockIndex() = default;
 
     explicit CBlockIndex(const CBlockHeader &block) : CBlockIndex() {
@@ -213,7 +232,7 @@ public:
     /**
      * Get the number of transaction in the chain so far.
      */
-    int64_t GetChainTxCount() const { return nChainTx; }
+    uint64_t GetChainTxCount() const { return nChainTx; }
 
     /**
      * Check whether this block's and all previous blocks' transactions have
@@ -235,22 +254,34 @@ public:
         return GetHeaderReceivedTime() - GetBlockTime();
     }
 
-    static constexpr int nMedianTimeSpan = 11;
+    static constexpr size_t nMedianTimeSpan = 11;
 
-    int64_t GetMedianTimePast() const {
-        int64_t pmedian[nMedianTimeSpan];
-        int64_t *pbegin = &pmedian[nMedianTimeSpan];
-        int64_t *pend = &pmedian[nMedianTimeSpan];
+private:
+    uint32_t CalculateMedianTimePast() const {
+        uint32_t pmedian[nMedianTimeSpan];
+        uint32_t *pbegin = &pmedian[nMedianTimeSpan];
+        uint32_t *pend = &pmedian[nMedianTimeSpan];
 
         const CBlockIndex *pindex = this;
-        for (int i = 0; i < nMedianTimeSpan && pindex;
-             i++, pindex = pindex->pprev) {
-            *(--pbegin) = pindex->GetBlockTime();
+        for (size_t i = 0; i < nMedianTimeSpan && pindex; ++i, pindex = pindex->pprev) {
+            *--pbegin = pindex->nTime;
         }
 
         std::sort(pbegin, pend);
         return pbegin[(pend - pbegin) / 2];
     }
+
+public:
+    int64_t GetMedianTimePast() const {
+        std::optional<uint32_t> ret = cachedMTP.Get();
+        if (!ret) {
+            ret = CalculateMedianTimePast();
+            cachedMTP.Set(*ret);
+        }
+        return static_cast<int64_t>(*ret);
+    }
+
+    void ClearCachedMTPValue() { cachedMTP.Clear(); }
 
     std::string ToString() const {
         return strprintf(
@@ -305,13 +336,16 @@ struct BlockHasher {
 };
 
 extern RecursiveMutex cs_main;
-typedef std::unordered_map<BlockHash, CBlockIndex *, BlockHasher> BlockMap;
+// Note that this codebase assumes CBlockIndex has stable pointers, which is the case with all std maps.
+// If we ever change this to a container without stable pointers, then we must use a std::unique_ptr<CBlockIndex> as the
+// mapped type here.
+using BlockMap = std::unordered_map<BlockHash, CBlockIndex, BlockHasher>;
 extern BlockMap &mapBlockIndex GUARDED_BY(cs_main);
 
 inline CBlockIndex *LookupBlockIndex(const BlockHash &hash) {
     AssertLockHeld(cs_main);
-    BlockMap::const_iterator it = mapBlockIndex.find(hash);
-    return it == mapBlockIndex.end() ? nullptr : it->second;
+    BlockMap::iterator it = mapBlockIndex.find(hash);
+    return it == mapBlockIndex.end() ? nullptr : &it->second;
 }
 
 arith_uint256 GetBlockProof(const CBlockIndex &block);
@@ -393,6 +427,9 @@ public:
             // old serialized data, indicate missing data.
             SER_READ(obj, obj.SetAblaStateOpt(std::nullopt));
         }
+
+        // clear the cachedMTP value (if any) when unserializing since it no longer would necessarily be correct
+        SER_READ(obj, obj.ClearCachedMTPValue());
     }
 
     BlockHash GetBlockHash() const {

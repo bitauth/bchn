@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2014 Wladimir J. van der Laan
+# Copyright (c) 2025 The Bitcoin developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 '''
@@ -16,30 +17,22 @@ import re
 import sys
 import os
 
-# Debian 8.11 (Jessie) has:
+# Ubuntu 22.04 (jammy) has:
 #
-# - g++ version 4.9.2 (https://packages.debian.org/search?suite=default&section=all&arch=any&searchon=names&keywords=g%2B%2B)
-# - libc version 2.19.18 (https://packages.debian.org/search?suite=default&section=all&arch=any&searchon=names&keywords=libc6)
-# - libstdc++ version 4.8.4 (https://packages.debian.org/search?suite=default&section=all&arch=any&searchon=names&keywords=libstdc%2B%2B6)
-#
-# Ubuntu 14.04 (Trusty Tahr) has:
-#
-# - g++ version 4.8.2 (https://packages.ubuntu.com/search?suite=trusty&section=all&arch=any&keywords=g%2B%2B&searchon=names)
-# - libc version 2.19.0 (https://packages.ubuntu.com/search?suite=trusty&section=all&arch=any&keywords=libc6&searchon=names)
-# - libstdc++ version 4.8.2 (https://packages.ubuntu.com/search?suite=trusty&section=all&arch=any&keywords=libstdc%2B%2B&searchon=names)
-#
-# Taking the minimum of these as our target.
+# - g++ version 11.2.0 (https://packages.ubuntu.com/search?suite=jammy&searchon=names&keywords=gcc)
+# - libc version 2.35 (https://packages.ubuntu.com/search?suite=jammy&section=all&arch=any&keywords=libc&searchon=names)
+# - libstdc++ version 11.2.0 (https://packages.ubuntu.com/search?suite=jammy&section=all&arch=any&keywords=libstdc%2B%2B&searchon=names)
 #
 # According to GNU ABI document (http://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html) this corresponds to:
-#   GCC 4.8.0: GCC_4.8.0
-#   GCC 4.8.0: GLIBCXX_3.4.18, CXXABI_1.3.7
-#   (glibc)    GLIBC_2_19
+#   GCC 11.1.0: GCC_11.0
+#   GCC 11.1.0: GLIBCXX_3.4.29, CXXABI_1.3.13
+#   (glibc)     GLIBC_2_35
 #
 MAX_VERSIONS = {
-    'GCC': (8, 3, 0),
-    'CXXABI': (1, 3, 7),
-    'GLIBCXX': (3, 4, 18),
-    'GLIBC': (2, 27),
+    'GCC': (11, 2, 0),
+    'CXXABI': (1, 3, 13),
+    'GLIBCXX': (3, 4, 29),
+    'GLIBC': (2, 35),
     'LIBATOMIC': (1, 0),
     'V' : (1, 0, 0),  # Some parts of libxkb* use this
     'gssapi_krb5_2' : (1, 0, 0), # OpenSSl 1.1.1 may link against this
@@ -50,6 +43,9 @@ MAX_VERSIONS = {
 # Ignore symbols that are exported as part of every executable
 IGNORE_EXPORTS = {
     '_edata', '_end', '__end__', '_init', '__bss_start', '__bss_start__', '_bss_end__', '__bss_end__', '_fini', '_IO_stdin_used', 'stdin', 'stdout', 'stderr',
+    '__libc_single_threaded',
+    # AArch64 exports these for all binaries
+    '.init', '.data',
     # Figure out why we get these symbols exported on xenial.
     '_ZNKSt5ctypeIcE8do_widenEc', 'in6addr_any', 'optarg',
     '_ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv'
@@ -94,7 +90,7 @@ ARCH_MIN_GLIBC_VER = {
     '80386': (2, 1),
     'X86-64': (2, 2, 5),
     'ARM': (2, 4),
-    'AArch64': (2, 17)
+    'AArch64': (2, 35)
 }
 
 

@@ -67,7 +67,7 @@ class Int64CScriptNum(BitcoinTestFramework):
         self.extra_args = [
             # Node0 has bigint64 activated (activates at upgrade8)
             # It must also have upgrade11 disabled (ints past 64-bits must be disabled for these tests)
-            ["-acceptnonstdtxn=1", "-expire=0", "-upgrade11activationtime=9999999999"],
+            ["-acceptnonstdtxn=1", "-expire=0", "-upgrade11activationheight=2000000000"],
         ]
 
     def bootstrap_p2p(self, *, num_connections=1):

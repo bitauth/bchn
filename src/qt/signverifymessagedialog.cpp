@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -124,7 +124,7 @@ void SignVerifyMessageDialog::on_signMessageButton_SM_clicked() {
             tr("Please check the address and try again."));
         return;
     }
-    const CKeyID *keyID = boost::get<CKeyID>(&destination);
+    const CKeyID *keyID = std::get_if<CKeyID>(&destination);
     if (!keyID) {
         ui->addressIn_SM->setValid(false);
         ui->statusLabel_SM->setStyleSheet("QLabel { color: red; }");
@@ -204,7 +204,7 @@ void SignVerifyMessageDialog::on_verifyMessageButton_VM_clicked() {
             tr("Please check the address and try again."));
         return;
     }
-    if (!boost::get<CKeyID>(&destination)) {
+    if (!std::get_if<CKeyID>(&destination)) {
         ui->addressIn_VM->setValid(false);
         ui->statusLabel_VM->setStyleSheet("QLabel { color: red; }");
         ui->statusLabel_VM->setText(

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <cashaddrenc.h>
@@ -7,11 +7,10 @@
 #include <chainparams.h>
 #include <pubkey.h>
 #include <script/script.h>
+#include <util/overloaded.h>
 #include <util/strencodings.h>
 
-#include <boost/variant/static_visitor.hpp>
-
-#include <algorithm>
+#include <variant>
 
 namespace {
 
@@ -65,31 +64,22 @@ std::vector<uint8_t> PackAddrData(const T &id, uint8_t type) {
     return converted;
 }
 
-// Implements encoding of CTxDestination using cashaddr.
-struct CashAddrEncoder : boost::static_visitor<std::string> {
-    CashAddrEncoder(const CChainParams &p, bool t) : params(p), tokenAwareType(t) {}
-
-    std::string operator()(const CKeyID &id) const {
-        std::vector<uint8_t> data = PackAddrData(id, tokenAwareType ? TOKEN_PUBKEY_TYPE : PUBKEY_TYPE);
-        return cashaddr::Encode(params.CashAddrPrefix(), data);
-    }
-
-    std::string operator()(const ScriptID &id) const {
-        std::vector<uint8_t> data = PackAddrData(id, tokenAwareType ? TOKEN_SCRIPT_TYPE : SCRIPT_TYPE);
-        return cashaddr::Encode(params.CashAddrPrefix(), data);
-    }
-
-    std::string operator()(const CNoDestination &) const { return ""; }
-
-private:
-    const CChainParams &params;
-    const bool tokenAwareType;
-};
-
 } // namespace
 
 std::string EncodeCashAddr(const CTxDestination &dst, const CChainParams &params, const bool tokenAwareType) {
-    return boost::apply_visitor(CashAddrEncoder(params, tokenAwareType), dst);
+    // Implements encoding of CTxDestination using cashaddr.
+    return std::visit(
+        util::Overloaded{
+            [&params, tokenAwareType](const CKeyID &id) {
+                std::vector<uint8_t> data = PackAddrData(id, tokenAwareType ? TOKEN_PUBKEY_TYPE : PUBKEY_TYPE);
+                return cashaddr::Encode(params.CashAddrPrefix(), data);
+            },
+            [&params, tokenAwareType](const ScriptID &id) {
+                std::vector<uint8_t> data = PackAddrData(id, tokenAwareType ? TOKEN_SCRIPT_TYPE : SCRIPT_TYPE);
+                return cashaddr::Encode(params.CashAddrPrefix(), data);
+            },
+            [](const CNoDestination &) { return std::string{}; },
+        }, dst);
 }
 
 std::string EncodeCashAddr(const std::string &prefix, const CashAddrContent &content) {

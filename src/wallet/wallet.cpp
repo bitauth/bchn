@@ -1,7 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2023 The Bitcoin developers
-// Copyright (c) 2022 The Bitcoin Cash Node developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -41,8 +40,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <future>
 #include <optional>
+#include <variant>
 
 static RecursiveMutex cs_wallets;
 static std::vector<std::shared_ptr<CWallet>> vpwallets GUARDED_BY(cs_wallets);
@@ -156,7 +155,7 @@ std::string COutput::ToString() const {
                      nDepth, FormatMoney(tx->tx->vout[i].nValue));
 }
 
-class CAffectedKeysVisitor : public boost::static_visitor<void> {
+class CAffectedKeysVisitor {
 private:
     const CKeyStore &keystore;
     std::vector<CKeyID> &vKeys;
@@ -172,7 +171,7 @@ public:
         int nRequired;
         if (ExtractDestinations(script, type, vDest, nRequired, 0 /* no p2sh_32 in wallet */)) {
             for (const CTxDestination &dest : vDest) {
-                boost::apply_visitor(*this, dest);
+                std::visit(*this, dest);
             }
         }
     }
@@ -3118,7 +3117,7 @@ CreateTransactionResult CWallet::CreateTransaction(
         CScript scriptChange;
 
         // coin control: send change to custom address
-        if (!boost::get<CNoDestination>(&coinControl.destChange)) {
+        if (!std::get_if<CNoDestination>(&coinControl.destChange)) {
             scriptChange = GetScriptForDestination(coinControl.destChange);
 
             // no coin control: send change to newly generated address
@@ -4354,7 +4353,7 @@ unsigned int CWallet::ComputeTimeSmart(const CWalletTx &wtx) const {
 
 bool CWallet::AddDestData(const CTxDestination &dest, const std::string &key,
                           const std::string &value) {
-    if (boost::get<CNoDestination>(&dest)) {
+    if (std::get_if<CNoDestination>(&dest)) {
         return false;
     }
 

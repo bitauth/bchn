@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,7 +15,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cstdbool>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

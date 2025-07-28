@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2019 The Bitcoin Core developers
-// Copyright (c) 2020-2023 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -1436,13 +1436,13 @@ QString RPCConsole::tabTitle(TabTypes tab_type) const {
 QKeySequence RPCConsole::tabShortcut(TabTypes tab_type) const {
     switch (tab_type) {
         case TAB_INFO:
-            return QKeySequence(Qt::CTRL + Qt::Key_I);
+            return QKeySequence(Qt::CTRL + static_cast<int>(Qt::Key_I));
         case TAB_CONSOLE:
-            return QKeySequence(Qt::CTRL + Qt::Key_T);
+            return QKeySequence(Qt::CTRL + static_cast<int>(Qt::Key_T));
         case TAB_GRAPH:
-            return QKeySequence(Qt::CTRL + Qt::Key_N);
+            return QKeySequence(Qt::CTRL + static_cast<int>(Qt::Key_N));
         case TAB_PEERS:
-            return QKeySequence(Qt::CTRL + Qt::Key_P);
+            return QKeySequence(Qt::CTRL + static_cast<int>(Qt::Key_P));
         default:
             return QKeySequence();
     }

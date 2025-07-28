@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -410,8 +410,7 @@ bool CScript::IsCommitment(const std::vector<uint8_t> &data) const {
 
 // A witness program is any valid CScript that consists of a 1-byte push opcode
 // followed by a data push between 2 and 40 bytes.
-bool CScript::IsWitnessProgram(int &version,
-                               std::vector<uint8_t> &program) const {
+bool CScript::IsWitnessProgram(int *pversion, std::vector<uint8_t> *pprogram) const {
     if (this->size() < 4 || this->size() > 42) {
         return false;
     }
@@ -419,18 +418,15 @@ bool CScript::IsWitnessProgram(int &version,
         return false;
     }
     if (size_t((*this)[1] + 2) == this->size()) {
-        version = DecodeOP_N((opcodetype)(*this)[0]);
-        program = std::vector<uint8_t>(this->begin() + 2, this->end());
+        if (pversion) {
+            *pversion = DecodeOP_N(static_cast<opcodetype>((*this)[0]));
+        }
+        if (pprogram) {
+            *pprogram = std::vector<uint8_t>(this->begin() + 2, this->end());
+        }
         return true;
     }
     return false;
-}
-
-// Wrapper returning only the predicate
-bool CScript::IsWitnessProgram() const {
-    int version;
-    std::vector<uint8_t> program;
-    return IsWitnessProgram(version, program);
 }
 
 bool CScript::IsPushOnly(const_iterator pc) const {

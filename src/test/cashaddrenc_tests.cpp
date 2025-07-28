@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -47,28 +47,26 @@ std::vector<uint8_t> insecure_GetRandomByteArray(FastRandomContext &rand,
     return out;
 }
 
-class DstTypeChecker : public boost::static_visitor<void> {
+class DstTypeChecker {
+    bool isKey;
+    bool isScript;
+    DstTypeChecker() : isKey(false), isScript(false) {}
 public:
-    void operator()(const CKeyID &id) { isKey = true; }
-    void operator()(const ScriptID &id) { isScript = true; }
+    void operator()(const CKeyID &) { isKey = true; }
+    void operator()(const ScriptID &) { isScript = true; }
     void operator()(const CNoDestination &) {}
 
     static bool IsScriptDst(const CTxDestination &d) {
         DstTypeChecker checker;
-        boost::apply_visitor(checker, d);
+        std::visit(checker, d);
         return checker.isScript;
     }
 
     static bool IsKeyDst(const CTxDestination &d) {
         DstTypeChecker checker;
-        boost::apply_visitor(checker, d);
+        std::visit(checker, d);
         return checker.isKey;
     }
-
-private:
-    DstTypeChecker() : isKey(false), isScript(false) {}
-    bool isKey;
-    bool isScript;
 };
 
 // Map all possible size bits in the version to the expected size of the
@@ -257,7 +255,6 @@ BOOST_AUTO_TEST_CASE(check_type) {
  * We ensure size is extracted and checked properly.
  */
 BOOST_AUTO_TEST_CASE(check_size) {
-    const CTxDestination nodst = CNoDestination{};
     const std::string prefix = "bitcoincash";
 
     std::vector<uint8_t> data;

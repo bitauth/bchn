@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2024 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -166,7 +166,7 @@ bool CBasicKeyStore::HaveWatchOnly() const {
 
 CKeyID GetKeyForDestination(const CKeyStore &store [[maybe_unused]], const CTxDestination &dest) {
     // Only supports destinations which map to single public keys, i.e. P2PKH.
-    if (auto id = boost::get<CKeyID>(&dest)) {
+    if (auto *id = std::get_if<CKeyID>(&dest)) {
         return *id;
     }
     return CKeyID();

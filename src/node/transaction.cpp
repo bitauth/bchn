@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2018 The Bitcoin Core developers
-// Copyright (c) 2020 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -27,6 +27,8 @@ TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
         nMaxRawTxFee = Amount::zero();
     }
 
+    uint64_t entryId{};
+
     { // cs_main scope
         LOCK(cs_main);
         CCoinsViewCache &view = *pcoinsTip;
@@ -43,7 +45,7 @@ TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
             bool fMissingInputs;
             if (!AcceptToMemoryPool(config, g_mempool, state, std::move(tx),
                                     &fMissingInputs, false /* bypass_limits */,
-                                    nMaxRawTxFee)) {
+                                    nMaxRawTxFee, false /* test_accept */, &entryId)) {
                 if (state.IsInvalid()) {
                     throw JSONRPCError(RPC_TRANSACTION_REJECTED,
                                        FormatStateMessage(state));
@@ -84,7 +86,7 @@ TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
     }
 
     CInv inv(MSG_TX, txid);
-    g_connman->ForEachNode([&inv](const NodeRef &pnode) { pnode->PushInventory(inv); });
+    g_connman->ForEachNode([&inv, entryId](const NodeRef &pnode) { pnode->PushInventory(inv, entryId); });
 
     return txid;
 }

@@ -2710,7 +2710,8 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
         flags |= SCRIPT_VERIFY_STRICTENC;
     }
 
-    if ((flags & SCRIPT_VERIFY_SIGPUSHONLY) != 0 && !scriptSig.IsPushOnly()) {
+    bool scriptSigIsKnownToBePushOnly{}; ///< If true, we tested the scriptSig already and it satisfies: `IsPushOnly()`
+    if (flags & SCRIPT_VERIFY_SIGPUSHONLY && !(scriptSigIsKnownToBePushOnly = scriptSig.IsPushOnly())) {
         return set_error(serror, ScriptError::SIG_PUSHONLY);
     }
 
@@ -2726,24 +2727,24 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
         // serror is set
         return false;
     }
-    if (flags & SCRIPT_VERIFY_P2SH) {
+    bool p2sh_32{};
+    const bool is_p2sh = flags & SCRIPT_VERIFY_P2SH && scriptPubKey.IsPayToScriptHash(flags, nullptr, &p2sh_32);
+    if (is_p2sh) {
+        // For p2sh, take a copy of the scriptSig resultant stack now; we will need it later for the second evaluation.
         stackCopy = stack;
     }
     if ( ! EvalScript(stack, scriptPubKey, flags, checker, metrics, serror)) {
         // serror is set
         return false;
     }
-    if (stack.empty()) {
-        return set_error(serror, ScriptError::EVAL_FALSE);
-    }
-    if (CastToBool(stack.back()) == false) {
+    if (stack.empty() || !CastToBool(stack.back())) {
         return set_error(serror, ScriptError::EVAL_FALSE);
     }
 
     // Additional validation for spend-to-script-hash transactions:
-    if (bool p2sh_32; (flags & SCRIPT_VERIFY_P2SH) && scriptPubKey.IsPayToScriptHash(flags, nullptr, &p2sh_32)) {
+    if (is_p2sh) {
         // scriptSig must be literals-only or validation fails
-        if (!scriptSig.IsPushOnly()) {
+        if (!scriptSigIsKnownToBePushOnly && !scriptSig.IsPushOnly()) {
             return set_error(serror, ScriptError::SIG_PUSHONLY);
         }
 
@@ -2755,8 +2756,7 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
         // EvalScript above would return false.
         assert(!stack.empty());
 
-        const valtype &pubKeySerialized = stack.back();
-        CScript pubKey2(pubKeySerialized.begin(), pubKeySerialized.end());
+        const CScript pubKey2(stack.back().begin(), stack.back().end());
         popstack(stack);
 
         // Bail out early if SCRIPT_DISALLOW_SEGWIT_RECOVERY is not set, the
@@ -2767,8 +2767,7 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
         // p2sh_32 since segwit funds can only be inadvertently locked into
         // p2sh_20 (legacy BTC) scripts, thus this special case for segwit
         // recovery should never apply to p2sh_32.
-        if ((flags & SCRIPT_DISALLOW_SEGWIT_RECOVERY) == 0 && !p2sh_32 && stack.empty() &&
-            pubKey2.IsWitnessProgram()) {
+        if ((flags & SCRIPT_DISALLOW_SEGWIT_RECOVERY) == 0 && !p2sh_32 && stack.empty() && pubKey2.IsWitnessProgram()) {
             // must set metricsOut for all successful returns
             metricsOut = metrics;
             return set_success(serror);
@@ -2778,10 +2777,7 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
             // serror is set
             return false;
         }
-        if (stack.empty()) {
-            return set_error(serror, ScriptError::EVAL_FALSE);
-        }
-        if (!CastToBool(stack.back())) {
+        if (stack.empty() || !CastToBool(stack.back())) {
             return set_error(serror, ScriptError::EVAL_FALSE);
         }
     }

@@ -1,7 +1,7 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
 // Copyright (C) 2019-2020 Tom Zander <tomz@freedommail.ch>
-// Copyright (c) 2020-2024 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -1391,9 +1391,15 @@ static bool AlreadyHave(const CInv &inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     return true;
 }
 
-static void RelayTransaction(const CTransaction &tx, CConnman *connman) {
+static void RelayTransaction(const CTransaction &tx, CConnman *connman, uint64_t entryId = 0) {
     CInv inv(MSG_TX, tx.GetId());
-    connman->ForEachNode([&inv](const NodeRef &pnode) { pnode->PushInventory(inv); });
+    if (!entryId) {
+        LOCK(g_mempool.cs);
+        if (auto optIter = g_mempool.GetIter(tx.GetId())) {
+            entryId = (*optIter)->GetEntryId();
+        }
+    }
+    connman->ForEachNode([&inv, entryId](const NodeRef &pnode) { pnode->PushInventory(inv, entryId); });
 }
 
 static void RelayAddress(const CAddress &addr, bool fReachable, const CConnman &connman) {
@@ -2094,10 +2100,12 @@ static void ProcessOrphanTx(const Config &config, CConnman *connman,
             it != rejectCountPerNode.end() && it->second > MAX_NON_STANDARD_ORPHAN_PER_NODE) {
             continue;
         }
+        uint64_t entryId{};
         if (AcceptToMemoryPool(config, g_mempool, stateDummy, porphanTx, &fMissingInputs2,
-                               false /* bypass_limits */, Amount::zero() /* nAbsurdFee */)) {
+                               false /* bypass_limits */, Amount::zero() /* nAbsurdFee */, false /* test_accept */,
+                               &entryId)) {
             LogPrint(BCLog::MEMPOOL, "   accepted orphan tx %s\n", orphanId.ToString());
-            RelayTransaction(orphanTx, connman);
+            RelayTransaction(orphanTx, connman, entryId);
             for (size_t i = 0; i < orphanTx.vout.size(); ++i) {
                 auto it_by_prev = internal::mapOrphanTransactionsByPrev.find(COutPoint(orphanId, i));
                 if (it_by_prev != internal::mapOrphanTransactionsByPrev.end()) {
@@ -3050,15 +3058,16 @@ static bool ProcessMessage(const Config &config, const NodeRef &pfrom,
 
         txrequest.ReceivedResponse(pfrom->GetId(), txid);
 
+        uint64_t entryId{};
         if (!AlreadyHave(inv) &&
             AcceptToMemoryPool(config, g_mempool, state, ptx, &fMissingInputs,
                                false /* bypass_limits */,
-                               Amount::zero() /* nAbsurdFee */)) {
+                               Amount::zero() /* nAbsurdFee */, false /* test_accept */, &entryId)) {
             g_mempool.check(pcoinsTip.get());
             // As this version of the transaction was acceptable, we can forget about any
             // requests for it.
             txrequest.ForgetTxId(tx.GetId());
-            RelayTransaction(tx, connman);
+            RelayTransaction(tx, connman, entryId);
             for (size_t i = 0; i < tx.vout.size(); ++i) {
                 auto it_by_prev = internal::mapOrphanTransactionsByPrev.find(COutPoint(txid, i));
                 if (it_by_prev != internal::mapOrphanTransactionsByPrev.end()) {
@@ -3148,7 +3157,7 @@ static bool ProcessMessage(const Config &config, const NodeRef &pfrom,
                 if (!state.IsInvalid(nDoS) || nDoS == 0) {
                     LogPrintf("Force relaying tx %s from whitelisted peer=%d\n",
                               tx.GetId().ToString(), pfrom->GetId());
-                    RelayTransaction(tx, connman);
+                    RelayTransaction(tx, connman, entryId);
                 } else {
                     LogPrintf("Not relaying invalid transaction %s from "
                               "whitelisted peer=%d (%s)\n",
@@ -4314,23 +4323,6 @@ void PeerLogicValidation::CheckForStaleTipAndEvictPeers(
     m_stale_tip_check_time = time_in_seconds + STALE_CHECK_INTERVAL;
 }
 
-namespace {
-class CompareInvMempoolOrder {
-    CTxMemPool *mp;
-
-public:
-    explicit CompareInvMempoolOrder(CTxMemPool *_mempool) : mp(_mempool) {}
-
-    bool operator()(std::set<TxId>::iterator a, std::set<TxId>::iterator b) {
-        /**
-         * As std::make_heap produces a max-heap, we want the entries which
-         * are topologically earlier to sort later.
-         */
-        return mp->CompareTopologically(*b, *a);
-    }
-};
-} // namespace
-
 bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
                                        std::atomic<bool> &interruptMsgProc [[maybe_unused]]) {
     const Consensus::Params &consensusParams =
@@ -4669,7 +4661,7 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
             // reserve memory, limiting it to what we anticipate to send, up to a cap of MAX_INV_SZ
             const uint64_t nTxsToSend = [&]() EXCLUSIVE_LOCKS_REQUIRED(pto->cs_inventory) {
                 LOCK(pto->cs_filter);
-                return pto->fRelayTxes ? pto->setInventoryTxToSend.size() : 0;
+                return pto->fRelayTxes ? pto->setInventoryTxToSendTopoSorted.size() : 0;
             }();
             const uint64_t nBlocksToSend = pto->vInventoryBlockToSend.size();
             /* we never send more that MAX_INV_SZ items at a time */
@@ -4680,7 +4672,7 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
         for (const BlockHash &hash : pto->vInventoryBlockToSend) {
             vInv.emplace_back(MSG_BLOCK, hash);
             if (vInv.size() == MAX_INV_SZ) {
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, std::move(vInv)));
                 vInv.clear();
             }
         }
@@ -4690,7 +4682,7 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
         for (const CInv &inv : pto->vInventoryToSend) {
             vInv.push_back(inv);
             if (vInv.size() == MAX_INV_SZ) {
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, std::move(vInv)));
                 vInv.clear();
             }
         }
@@ -4713,7 +4705,7 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
         if (fSendTrickle) {
             LOCK(pto->cs_filter);
             if (!pto->fRelayTxes) {
-                pto->setInventoryTxToSend.clear();
+                pto->setInventoryTxToSendTopoSorted.clear();
             }
         }
 
@@ -4731,7 +4723,12 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
 
             for (const auto &txinfo : vtxinfo) {
                 const TxId &txid = txinfo.tx->GetId();
-                pto->setInventoryTxToSend.erase(txid);
+                // erase this txid from the set since we are relaying it now
+                std::pair eraseItem(txinfo.entryId, txid);
+                pto->setInventoryTxToSendTopoSorted.erase(eraseItem);
+                // also erase any "unknown" entryId==0 entries from the set for this txid
+                eraseItem.first = 0;
+                pto->setInventoryTxToSendTopoSorted.erase(eraseItem);
                 if (filterrate != Amount::zero() &&
                     txinfo.feeRate.GetFeePerK() < filterrate) {
                     continue;
@@ -4743,8 +4740,7 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
                 pto->filterInventoryKnown.insert(txid);
                 vInv.emplace_back(MSG_TX, txid);
                 if (vInv.size() == MAX_INV_SZ) {
-                    connman->PushMessage(pto,
-                                         msgMaker.Make(NetMsgType::INV, vInv));
+                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, std::move(vInv)));
                     vInv.clear();
                 }
             }
@@ -4753,13 +4749,27 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
 
         // Determine transactions to relay
         if (fSendTrickle) {
-            // Produce a vector with all candidates for sending
-            std::vector<std::set<TxId>::iterator> vInvTx;
-            vInvTx.reserve(pto->setInventoryTxToSend.size());
-            for (std::set<TxId>::iterator it =
-                     pto->setInventoryTxToSend.begin();
-                 it != pto->setInventoryTxToSend.end(); it++) {
-                vInvTx.push_back(it);
+            // First, resolve all `entryId == 0` entries in `setInventoryTxToSendTopoSorted`. These unresolved entries
+            // live in the beginning of the map. `entryId == 0` entries may occur if some code requested to relay a txn
+            // for which it didn't necessarily know the mempool acceptance order (wallet & RPC code may do this). We
+            // resolve these first so that the loop later down in this code block is iterating over txns in topological
+            // order (so that we always relay in topological order).
+            auto IsUnresolvedEntryId = [&pto](const auto &it) EXCLUSIVE_LOCKS_REQUIRED(pto->cs_inventory) {
+                return it != pto->setInventoryTxToSendTopoSorted.end() && it->first == 0;
+            };
+            if (auto it = pto->setInventoryTxToSendTopoSorted.begin(); IsUnresolvedEntryId(it)) {
+                LOCK(g_mempool.cs);
+                do {
+                    const TxId txid = it->second;
+                    // Erase first, re-add with correct ordering if still in mempool.
+                    pto->setInventoryTxToSendTopoSorted.erase(it);
+                    if (const auto itmp = g_mempool.GetIter(txid)) {
+                        if (const auto entryId = (*itmp)->GetEntryId()) {
+                            // Re-add with mempool admission order sorting (topological sorting).
+                            pto->setInventoryTxToSendTopoSorted.emplace(entryId, txid);
+                        }
+                    }
+                } while (IsUnresolvedEntryId(it = pto->setInventoryTxToSendTopoSorted.begin()));
             }
             Amount filterrate = Amount::zero();
             {
@@ -4768,45 +4778,40 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
             }
             // Send out the inventory in the order of admission to our mempool,
             // which is guaranteed to be a topological sort order.
-            // A heap is used so that not all items need sorting if only a
-            // few are being sent.
-            CompareInvMempoolOrder compareInvMempoolOrder(&g_mempool);
-            std::make_heap(vInvTx.begin(), vInvTx.end(),
-                           compareInvMempoolOrder);
+
             // No reason to drain out at many times the network's capacity,
             // especially since we have many peers and some will draw much
             // shorter delays.
-            unsigned int nRelayedTransactions = 0;
+            size_t nRelayedTransactions = 0;
             LOCK(pto->cs_filter);
-            while (!vInvTx.empty() && nRelayedTransactions < nMaxBroadcasts) {
-                // Fetch the top element from the heap
-                std::pop_heap(vInvTx.begin(), vInvTx.end(),
-                              compareInvMempoolOrder);
-                std::set<TxId>::iterator it = vInvTx.back();
-                vInvTx.pop_back();
-                TxId txid = *it;
-                // Remove it from the to-be-sent set
-                pto->setInventoryTxToSend.erase(it);
+            while (!pto->setInventoryTxToSendTopoSorted.empty() && nRelayedTransactions < nMaxBroadcasts) {
+                // Fetch the top element from the set (earliest txn)
+                TxId txid{TxId::Uninitialized};
+                {
+                    auto it = pto->setInventoryTxToSendTopoSorted.begin();
+                    txid = it->second;
+
+                    // Remove it from the to-be-sent set
+                    pto->setInventoryTxToSendTopoSorted.erase(it);
+                }
                 // Check if not in the filter already
                 if (pto->filterInventoryKnown.contains(txid)) {
                     continue;
                 }
-                // Not in the mempool anymore? don't bother sending it.
+                // Not in the mempool anymore? Don't bother sending it.
                 auto txinfo = g_mempool.info(txid);
                 if (!txinfo.tx) {
                     continue;
                 }
-                if (filterrate != Amount::zero() &&
-                    txinfo.feeRate.GetFeePerK() < filterrate) {
+                if (filterrate != Amount::zero() && txinfo.feeRate.GetFeePerK() < filterrate) {
                     continue;
                 }
-                if (pto->pfilter &&
-                    !pto->pfilter->IsRelevantAndUpdate(*txinfo.tx)) {
+                if (pto->pfilter && !pto->pfilter->IsRelevantAndUpdate(*txinfo.tx)) {
                     continue;
                 }
                 // Send
                 vInv.emplace_back(MSG_TX, txid);
-                nRelayedTransactions++;
+                ++nRelayedTransactions;
                 {
                     // Expire old relay messages
                     while (!vRelayExpiration.empty() &&
@@ -4815,16 +4820,13 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
                         vRelayExpiration.pop_front();
                     }
 
-                    auto ret = mapRelay.insert(
-                        std::make_pair(txid, std::move(txinfo.tx)));
+                    auto ret = mapRelay.emplace(txid, txinfo.tx);
                     if (ret.second) {
-                        vRelayExpiration.emplace_back(
-                            nNow + 15 * 60 * 1000000, ret.first);
+                        vRelayExpiration.emplace_back(nNow + 15 * 60 * 1000000, ret.first);
                     }
                 }
                 if (vInv.size() == MAX_INV_SZ) {
-                    connman->PushMessage(pto,
-                                         msgMaker.Make(NetMsgType::INV, vInv));
+                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, std::move(vInv)));
                     vInv.clear();
                 }
                 pto->filterInventoryKnown.insert(txid);
@@ -4832,7 +4834,8 @@ bool PeerLogicValidation::SendMessages(const Config &config, NodeRef pto,
         }
     }
     if (!vInv.empty()) {
-        connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
+        connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, std::move(vInv)));
+        vInv.clear();
     }
 
     // Detect whether we're stalling

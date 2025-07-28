@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2018 The Bitcoin Core developers
-// Copyright (c) 2020-2022 The Bitcoin developers
+// Copyright (c) 2020-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,9 +7,11 @@
 
 #include <policy/policy.h>
 #include <rpc/protocol.h>
+#include <util/check.h>
 
 bool FillPSBT(const CWallet *pwallet, PartiallySignedTransaction &psbtx, uint32_t scriptFlags,
               SigHashType sighash_type, bool sign, bool bip32derivs) {
+    CHECK_NONFATAL(psbtx.tx);
     LOCK(pwallet->cs_wallet);
     // Get all of the previous transactions
     bool complete = true;

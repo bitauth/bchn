@@ -380,8 +380,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestination) {
         s.clear();
         s << ToByteVector(pubkey) << OP_CHECKSIG;
         BOOST_CHECK(ExtractDestination(s, address, flags));
-        BOOST_CHECK(boost::get<CKeyID>(&address) &&
-                    *boost::get<CKeyID>(&address) == pubkey.GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&address) &&
+                    *std::get_if<CKeyID>(&address) == pubkey.GetID());
         address = {};
 
         // TX_PUBKEYHASH
@@ -389,8 +389,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestination) {
         s << OP_DUP << OP_HASH160 << ToByteVector(pubkey.GetID()) << OP_EQUALVERIFY
           << OP_CHECKSIG;
         BOOST_CHECK(ExtractDestination(s, address, flags));
-        BOOST_CHECK(boost::get<CKeyID>(&address) &&
-                    *boost::get<CKeyID>(&address) == pubkey.GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&address) &&
+                    *std::get_if<CKeyID>(&address) == pubkey.GetID());
         address = {};
 
         // TX_SCRIPTHASH
@@ -398,8 +398,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestination) {
         s.clear();
         s << OP_HASH160 << ToByteVector(ScriptID(redeemScript, false /* p2sh_32 */)) << OP_EQUAL;
         BOOST_CHECK(ExtractDestination(s, address, flags));
-        BOOST_CHECK(boost::get<ScriptID>(&address) &&
-                    *boost::get<ScriptID>(&address) == ScriptID(redeemScript, false));
+        BOOST_CHECK(std::get_if<ScriptID>(&address) &&
+                    *std::get_if<ScriptID>(&address) == ScriptID(redeemScript, false));
         address = {};
 
         // TX_SCRIPTHASH (P2SH_32)
@@ -407,8 +407,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestination) {
         s << OP_HASH256 << ToByteVector(ScriptID(redeemScript, true /* p2sh_32 */)) << OP_EQUAL;
         if (enable_p2sh32) {
             BOOST_CHECK(ExtractDestination(s, address, flags));
-            BOOST_CHECK(boost::get<ScriptID>(&address) &&
-                        *boost::get<ScriptID>(&address) == ScriptID(redeemScript, true /* p2sh_32 */));
+            BOOST_CHECK(std::get_if<ScriptID>(&address) &&
+                        *std::get_if<ScriptID>(&address) == ScriptID(redeemScript, true /* p2sh_32 */));
         } else {
             BOOST_CHECK_MESSAGE(!ExtractDestination(s, address, flags),
                                 strprintf("When disabling SCRIPT_ENABLE_P2SH_32, expected ExtractDestination to fail: %s",
@@ -496,8 +496,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
         BOOST_CHECK_EQUAL(whichType, TX_PUBKEY);
         BOOST_CHECK_EQUAL(addresses.size(), 1U);
         BOOST_CHECK_EQUAL(nRequired, 1);
-        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&addresses[0]) &&
+                    *std::get_if<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
 
         // TX_PUBKEYHASH
         s.clear();
@@ -507,8 +507,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
         BOOST_CHECK_EQUAL(whichType, TX_PUBKEYHASH);
         BOOST_CHECK_EQUAL(addresses.size(), 1U);
         BOOST_CHECK_EQUAL(nRequired, 1);
-        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&addresses[0]) &&
+                    *std::get_if<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
 
         // TX_SCRIPTHASH
         // initialize with leftover P2PKH script
@@ -519,8 +519,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
         BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
         BOOST_CHECK_EQUAL(addresses.size(), 1U);
         BOOST_CHECK_EQUAL(nRequired, 1);
-        BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
-                    *boost::get<ScriptID>(&addresses[0]) ==
+        BOOST_CHECK(std::get_if<ScriptID>(&addresses[0]) &&
+                    *std::get_if<ScriptID>(&addresses[0]) ==
                         ScriptID(redeemScript, false /* p2sh_32 */));
 
         // TX_SCRIPTHASH (P2SH_32)
@@ -532,8 +532,8 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
             BOOST_CHECK_EQUAL(whichType, TX_SCRIPTHASH);
             BOOST_CHECK_EQUAL(addresses.size(), 1U);
             BOOST_CHECK_EQUAL(nRequired, 1);
-            BOOST_CHECK(boost::get<ScriptID>(&addresses[0]) &&
-                        *boost::get<ScriptID>(&addresses[0]) == ScriptID(redeemScript, true /* p2sh_32 */));
+            BOOST_CHECK(std::get_if<ScriptID>(&addresses[0]) &&
+                        *std::get_if<ScriptID>(&addresses[0]) == ScriptID(redeemScript, true /* p2sh_32 */));
         } else {
             BOOST_CHECK(!ExtractDestinations(s, whichType, addresses, nRequired, flags));
             BOOST_CHECK_EQUAL(whichType, enable_p2s ? TX_SCRIPT : TX_NONSTANDARD);
@@ -548,10 +548,10 @@ BOOST_AUTO_TEST_CASE(script_standard_ExtractDestinations) {
         BOOST_CHECK_EQUAL(whichType, TX_MULTISIG);
         BOOST_CHECK_EQUAL(addresses.size(), 2U);
         BOOST_CHECK_EQUAL(nRequired, 2);
-        BOOST_CHECK(boost::get<CKeyID>(&addresses[0]) &&
-                    *boost::get<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
-        BOOST_CHECK(boost::get<CKeyID>(&addresses[1]) &&
-                    *boost::get<CKeyID>(&addresses[1]) == pubkeys[1].GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&addresses[0]) &&
+                    *std::get_if<CKeyID>(&addresses[0]) == pubkeys[0].GetID());
+        BOOST_CHECK(std::get_if<CKeyID>(&addresses[1]) &&
+                    *std::get_if<CKeyID>(&addresses[1]) == pubkeys[1].GetID());
 
         // TX_NULL_DATA
         s.clear();

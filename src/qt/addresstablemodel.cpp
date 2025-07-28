@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2020 The Bitcoin developers
+// Copyright (c) 2017-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -243,7 +243,7 @@ bool AddressTableModel::setData(const QModelIndex &index, const QVariant &value,
             CTxDestination newAddress = DecodeDestination(
                 value.toString().toStdString(), walletModel->getChainParams());
             // Refuse to set invalid address, set error status and return false
-            if (boost::get<CNoDestination>(&newAddress)) {
+            if (std::get_if<CNoDestination>(&newAddress)) {
                 editStatus = INVALID_ADDRESS;
                 return false;
             }

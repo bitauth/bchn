@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2021-2024 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -2057,7 +2057,7 @@ void CConnman::ThreadMessageHandler() {
                                      || !pnode->vInventoryToSend.empty()
                                      || !pnode->vInventoryBlockToSend.empty() || !pnode->vBlockHashesToAnnounce.empty()
                                      || (WITH_LOCK(pnode->cs_filter, return pnode->fRelayTxes)
-                                         && !pnode->setInventoryTxToSend.empty()));
+                                         && !pnode->setInventoryTxToSendTopoSorted.empty()));
 
                 // Calculate next wakeup time as the closest time in the future we plan on sending an Inv messgae.
                 if (hasInvToSend) {
