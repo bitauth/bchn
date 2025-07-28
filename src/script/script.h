@@ -131,7 +131,7 @@ enum opcodetype {
     /* OP_LSHIFT = 0x98, */ // Historical (early Bitcoin)
     /* OP_RSHIFT = 0x99, */ // Historical (early Bitcoin)
     OP_LSHIFTBIN = 0x98, // after upgrade12 (May 2026); binary blob left-shift (non-arithmetic)
-    OP_RSHIFTBIN= 0x99, // after upgrade12 (May 2026); binary blob right-shift (non-arithmetic)
+    OP_RSHIFTBIN = 0x99, // after upgrade12 (May 2026); binary blob right-shift (non-arithmetic)
 
     OP_BOOLAND = 0x9a,
     OP_BOOLOR = 0x9b,
