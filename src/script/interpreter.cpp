@@ -178,7 +178,7 @@ struct EvalFrame {
     using ScriptView = Span<const uint8_t>;
     const ScriptView script;        ///< The script we are evaluating (as a view type)
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
-    const uint8_t *pc;              ///< Initially equal to varScript.begin(), but incremented as we execute the script
+    const uint8_t *pc;              ///< Initially equal to script.begin(), but incremented as we execute the script
     const uint8_t *pbegincodehash;  ///< Initially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
     /**
