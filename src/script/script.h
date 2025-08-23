@@ -638,7 +638,7 @@ public:
         } else {
             const uint64_t uval = value_ < 0 ? -static_cast<uint64_t>(value_) // safely cast to positive
                                              :  static_cast<uint64_t>(value_);
-            return std::max(1, std::bit_width(uval));
+            return std::max<unsigned>(1, std::bit_width(uval));
         }
     }
 

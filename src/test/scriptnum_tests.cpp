@@ -902,9 +902,9 @@ void CheckShift(const int64_t v) {
         BOOST_REQUIRE(csn.getint64() == v);
         const bool neg = v < 0;
         const uint64_t uv = static_cast<uint64_t>(std::abs(v));
-        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), csn.absValNumBits());
-        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), res2->absValNumBits());
-        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), fastBigNum.absValNumBits());
+        BOOST_CHECK_EQUAL(std::max<unsigned>(1, std::bit_width(uv)), csn.absValNumBits());
+        BOOST_CHECK_EQUAL(std::max<unsigned>(1, std::bit_width(uv)), res2->absValNumBits());
+        BOOST_CHECK_EQUAL(std::max<unsigned>(1, std::bit_width(uv)), fastBigNum.absValNumBits());
         // for performance, don't run through every bit shift; intentionally attempt shifts in key spots, and past 63
         constexpr size_t maxBits = ScriptBigInt::MAX_BITS;
         const unsigned shiftAmts[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 30, 31,
