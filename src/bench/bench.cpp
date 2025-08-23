@@ -145,7 +145,7 @@ void BenchRunner::RunAll(Printer &printer, uint64_t num_evals,
     printer.header();
 
     std::optional<TestingSetup> optTestSetup;
-    for (auto &[name, bench] : benchmarks()) {
+    for (auto & [name, bench] : benchmarks()) {
         if (!internalFilter.empty() && !std::regex_search(name, reFilterInternal)) {
             continue;
         }
