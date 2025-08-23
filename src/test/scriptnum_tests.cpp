@@ -928,7 +928,8 @@ void CheckShift(const int64_t v) {
             if (okC) {
                 BOOST_CHECK(c == 0 || std::bit_width(uv) + i < 64);
                 BOOST_CHECK_EQUAL(c.absValNumBits(), fbn.absValNumBits());
-                const int64_t lshifted = neg ? -(uv << i) : uv << i;
+                const unsigned safe_i = std::min(i, 63u); // avoid UB in C++, since shifting past 63 is UB
+                const int64_t lshifted = neg ? -(uv << safe_i) : uv << safe_i;
                 BOOST_CHECK(c.getint64() != int64_t_min);
                 // check equality via getint64()
                 BOOST_CHECK(sbi.getint64().value() == c.getint64());
