@@ -14,8 +14,10 @@
 #include <script/vm_limits.h> // for constants MAX_SCRIPT_SIZE, MAX_STACK_SIZE, etc
 #include <serialize.h>
 
+#include <bit>
 #include <cassert>
 #include <climits>
+#include <compare>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -23,6 +25,8 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 template <typename T> std::vector<uint8_t> ToByteVector(const T &in) {
@@ -267,18 +271,16 @@ struct ScriptIntBase {
 protected:
     IntType value_;
 
-    static
-    bool valid64BitRange(int64_t x) {
-        return x > std::numeric_limits<int64_t>::min();
-    }
-
     /* 10KB limit or +/- 2^79999 - 1; If changing this also update script_error.cpp to denote the new valid range. */
     static constexpr size_t MAXIMUM_ELEMENT_SIZE_BIG_INT = may2025::MAX_SCRIPT_ELEMENT_SIZE;
+    static constexpr size_t MAX_BIG_INT_BITS = MAXIMUM_ELEMENT_SIZE_BIG_INT * 8u - 1u;
+
+    // Maximum number consensus-legal bits for IntType (63 or 79999)
+    static constexpr size_t MAX_BITS = UsesBigInt ? MAX_BIG_INT_BITS : 63;
 
     static
     const BigInt &bigIntConsensusMax() {
-        constexpr size_t maxBits = MAXIMUM_ELEMENT_SIZE_BIG_INT * 8u - 1;
-        static const BigInt ret = BigInt(2).pow(maxBits) - 1u;
+        static const BigInt ret = BigInt(2).pow(MAX_BIG_INT_BITS) - 1u;
         return ret;
     }
 
@@ -288,22 +290,22 @@ protected:
         return ret;
     }
 
-    // Used if UsesBigInt == true; checks that `x` is within the MAXIMUM_ELEMENT_SIZE_BIG_INT range.
+    // If UsesBigInt == true; checks that `x` is within the MAXIMUM_ELEMENT_SIZE_BIG_INT range,
+    // otherwise checks that x is not INT64_MIN
     static
-    bool validBigIntRange(BigInt const& x) {
-        return x >= bigIntConsensusMin() && x <= bigIntConsensusMax();
+    bool validRange(IntType const& x) {
+        if constexpr (UsesBigInt) {
+            return x >= bigIntConsensusMin() && x <= bigIntConsensusMax();
+        } else {
+            return x > std::numeric_limits<int64_t>::min();
+        }
     }
+
 
     static
     std::optional<Derived> derivedIfInRange(IntType x) {
-        if constexpr (UsesBigInt) {
-            if ( ! validBigIntRange(x)) {
-                return std::nullopt;
-            }
-        } else {
-            if ( ! valid64BitRange(x)) {
-                return std::nullopt;
-            }
+        if ( ! validRange(x)) {
+            return std::nullopt;
         }
         return Derived(std::move(x));
     }
@@ -353,85 +355,249 @@ public:
 
     // Arithmetic operations
     std::optional<Derived> safeAdd(IntType const& x) const noexcept(!UsesBigInt) {
-        if constexpr (UsesBigInt) {
-            return derivedIfInRange(value_ + x);
-        } else {
-            int64_t val;
-            bool const res = __builtin_add_overflow(value_, x, &val);
-            if (res) {
-                return std::nullopt;
-            }
-
-            return derivedIfInRange(val);
+        std::optional<Derived> ret = Derived(value_);
+        if (! ret->safeAddInPlace(x)) {
+            ret.reset();
         }
+        return ret;
     }
 
     std::optional<Derived> safeAdd(Derived const& x) const noexcept(!UsesBigInt) {
         return safeAdd(x.value_);
     }
 
-    std::optional<Derived> safeSub(IntType const& x) const noexcept(!UsesBigInt) {
+    std::optional<Derived> safeAdd(int64_t x) const requires UsesBigInt { // (BigInt only) optimization for int64_t
+        return derivedIfInRange(value_ + x);
+    }
+
+    [[nodiscard]]
+    bool safeAddInPlace(IntType const& x) noexcept(!UsesBigInt) {
         if constexpr (UsesBigInt) {
-            return derivedIfInRange(value_ - x);
+            bool const ok = validRange(value_ += x);
+            if (!ok) [[unlikely]] value_ -= x; // failure; undo effects of above to restore previous state
+            return ok;
         } else {
-            int64_t val;
-            bool const res = __builtin_sub_overflow(value_, x, &val);
-            if (res) {
-                return std::nullopt;
+            int64_t result;
+            bool const overflow = __builtin_add_overflow(value_, x, &result);
+            if (overflow || !validRange(result)) {
+                return false;
             }
-            return derivedIfInRange(val);
+            value_ = result;
+            return true;
         }
+    }
+
+    [[nodiscard]]
+    bool safeAddInPlace(Derived const& x) noexcept(!UsesBigInt) {
+        return safeAddInPlace(x.value_);
+    }
+
+    [[nodiscard]]
+    bool safeAddInPlace(int64_t x) requires UsesBigInt { // (BigInt only) optimization for int64_t
+        bool const ok = validRange(value_ += x);
+        if (!ok) [[unlikely]] value_ -= x; // failure; undo effects of above to restore previous state
+        return ok;
+    }
+
+    [[nodiscard]]
+    bool safeIncr() noexcept(!UsesBigInt) {
+        if constexpr (UsesBigInt) {
+            bool const ok = validRange(++value_);
+            if (!ok) [[unlikely]] --value_; // failure; undo effects of above to restore previous state
+            return ok;
+        } else {
+            int64_t result;
+            bool const overflow = __builtin_add_overflow(value_, 1u, &result);
+            if (overflow || !validRange(result)) {
+                return false;
+            }
+            value_ = result;
+            return true;
+        }
+    }
+
+    std::optional<Derived> safeSub(IntType const& x) const noexcept(!UsesBigInt) {
+        std::optional<Derived> ret = Derived(value_);
+        if (! ret->safeSubInPlace(x)) {
+            ret.reset();
+        }
+        return ret;
     }
 
     std::optional<Derived> safeSub(Derived const& x) const noexcept(!UsesBigInt) {
         return safeSub(x.value_);
     }
 
-    std::optional<Derived> safeMul(IntType const& x) const noexcept(!UsesBigInt) {
+    std::optional<Derived> safeSub(int64_t x) const requires UsesBigInt { // (BigInt only) optimization for int64_t
+        return derivedIfInRange(value_ - x);
+    }
+
+    [[nodiscard]]
+    bool safeSubInPlace(IntType const& x) noexcept(!UsesBigInt) {
         if constexpr (UsesBigInt) {
-            return derivedIfInRange(value_ * x);
+            bool const ok = validRange(value_ -= x);
+            if (!ok) [[unlikely]] value_ += x; // failure; undo effects of above to restore previous state
+            return ok;
         } else {
-            int64_t val;
-            bool const res = __builtin_mul_overflow(value_, x, &val);
-            if (res) {
-                return std::nullopt;
+            int64_t result;
+            bool const overflow = __builtin_sub_overflow(value_, x, &result);
+            if (overflow || !validRange(result)) {
+                return false;
             }
-            return derivedIfInRange(val);
+            value_ = result;
+            return true;
         }
+    }
+
+    [[nodiscard]]
+    bool safeSubInPlace(Derived const& x) noexcept(!UsesBigInt) {
+        return safeSubInPlace(x.value_);
+    }
+
+    [[nodiscard]]
+    bool safeSubInPlace(int64_t x) requires UsesBigInt { // (BigInt only) optimization for int64_t
+        bool const ok = validRange(value_ -= x);
+        if (!ok) [[unlikely]] value_ += x; // failure; undo effects of above to restore previous state
+        return ok;
+    }
+
+    [[nodiscard]]
+    bool safeDecr() noexcept(!UsesBigInt) {
+        if constexpr (UsesBigInt) {
+            bool const ok = validRange(--value_);
+            if (!ok) [[unlikely]] ++value_; // failure; undo effects of above to restore previous state
+            return ok;
+        } else {
+            int64_t result;
+            bool const overflow = __builtin_sub_overflow(value_, 1u, &result);
+            if (overflow || !validRange(result)) {
+                return false;
+            }
+            value_ = result;
+            return true;
+        }
+    }
+
+    std::optional<Derived> safeMul(IntType const& x) const noexcept(!UsesBigInt) {
+        std::optional<Derived> ret = Derived(value_);
+        if (! ret->safeMulInPlace(x)) {
+            ret.reset();
+        }
+        return ret;
     }
 
     std::optional<Derived> safeMul(Derived const& x) const noexcept(!UsesBigInt) {
         return safeMul(x.value_);
     }
 
-    Derived operator/(IntType const& x) const noexcept(!UsesBigInt) {
-        if constexpr ( ! UsesBigInt) {
-            if (x == -1 && ! valid64BitRange(value_)) {
-                // Guard against overflow, which can't normally happen unless class is misused
-                // by the fromIntUnchecked() factory method (may happen in tests).
-                // This will return INT64_MIN which is what ARM & x86 does anyway for INT64_MIN / -1.
-                return Derived(value_);
+    std::optional<Derived> safeMul(int64_t x) const requires UsesBigInt { // (BigInt only) optimization for int64_t
+        return derivedIfInRange(value_ * x);
+    }
+
+    [[nodiscard]]
+    bool safeMulInPlace(IntType const& x) noexcept(!UsesBigInt) {
+        if constexpr (UsesBigInt) {
+            bool const ok = validRange(value_ *= x);
+            if (!ok) [[unlikely]] {
+                assert(x != 0); // should never happen; if triggered, some bug exists with validRange()
+                value_ /= x; // failure; undo effects of above to restore previous state
             }
+            return ok;
+        } else {
+            int64_t result;
+            bool const overflow = __builtin_mul_overflow(value_, x, &result);
+            if (overflow || !validRange(result)) {
+                return false;
+            }
+            value_ = result;
+            return true;;
         }
-        return Derived(value_ / x);
+    }
+
+    [[nodiscard]]
+    bool safeMulInPlace(Derived const& x) noexcept(!UsesBigInt) {
+        return safeMulInPlace(x.value_);
+    }
+
+    [[nodiscard]]
+    bool safeMulInPlace(int64_t x) requires UsesBigInt { // (BigInt only) optimization for int64_t
+        bool const ok = validRange(value_ *= x);
+        if (!ok) [[unlikely]] {
+            assert(x != 0); // should never happen; if triggered, some bug exists with validRange()
+            value_ /= x; // failure; undo effects of above to restore previous state
+        }
+        return ok;
+    }
+
+    Derived operator/(IntType const& x) const noexcept(!UsesBigInt) {
+        Derived ret(value_);
+        ret.operator/=(x);
+        return ret;
     }
 
     Derived operator/(Derived const& x) const noexcept(!UsesBigInt) {
         return operator/(x.value_);
     }
 
-    Derived operator%(IntType const& x) const noexcept(!UsesBigInt) {
+    Derived operator/(int64_t x) const requires UsesBigInt { // (BigInt only) optimization for int64_t
+        return Derived(value_ / x);
+    }
+
+    Derived &operator/=(Derived const& x) noexcept(!UsesBigInt) {
+        return operator/=(x.value_);
+    }
+
+    Derived &operator/=(IntType const& x) noexcept(!UsesBigInt) {
         if constexpr ( ! UsesBigInt) {
-            if (x == -1 && ! valid64BitRange(value_)) {
-                // INT64_MIN % -1 is UB in C++, but mathematically it would yield 0
-                return Derived(0);
+            if (x == -1 && ! validRange(value_)) {
+                // Guard against overflow, which can't normally happen unless class is misused
+                // by the fromIntUnchecked() factory method (may happen in tests).
+                // This will return INT64_MIN which is what ARM & x86 does anyway for INT64_MIN / -1.
+                return static_cast<Derived &>(*this);
             }
         }
-        return Derived(value_ % x);
+        value_ /= x;
+        return static_cast<Derived &>(*this);
+    }
+
+    Derived &operator/=(int64_t x) requires UsesBigInt { // (BigInt only) optimization for int64_t
+        value_ /= x;
+        return static_cast<Derived &>(*this);
+    }
+
+    Derived operator%(IntType const& x) const noexcept(!UsesBigInt) {
+        Derived ret(value_);
+        ret.operator%=(x);
+        return ret;
     }
 
     Derived operator%(Derived const& x) const noexcept(!UsesBigInt) {
         return operator%(x.value_);
+    }
+
+    Derived operator%(int64_t x) const requires UsesBigInt { // (BigInt only) optimization for int64_t
+        return Derived(value_ % x);
+    }
+
+    Derived &operator%=(IntType const& x) noexcept(!UsesBigInt) {
+        if constexpr ( ! UsesBigInt) {
+            if (x == -1 && ! validRange(value_)) {
+                // INT64_MIN % -1 is UB in C++, but mathematically it would yield 0
+                value_ = 0;
+                return static_cast<Derived &>(*this);
+            }
+        }
+        value_ %= x;
+        return static_cast<Derived &>(*this);
+    }
+
+    Derived &operator%=(Derived const& x) noexcept(!UsesBigInt) {
+        return operator%=(x.value_);
+    }
+
+    Derived &operator%=(int64_t x) requires UsesBigInt { // (BigInt only) optimization for int64_t
+        value_ %= x;
+        return static_cast<Derived &>(*this);
     }
 
     // Bitwise operations
@@ -443,14 +609,17 @@ public:
         return safeBitwiseAnd(x.value_);
     }
 
-    Derived operator-() const noexcept(!UsesBigInt) {
+    Derived &negate() noexcept(!UsesBigInt) {
         if constexpr (UsesBigInt) {
-            return Derived(-value_);
+            value_.negate();
         } else {
             // Defensive programming: -INT64_MIN is UB
-            return Derived(valid64BitRange(value_) ? -value_ : value_);
+            value_ = validRange(value_) ? -value_ : value_;
         }
+        return static_cast<Derived &>(*this);
     }
+
+    Derived operator-() const noexcept(!UsesBigInt) { return Derived(value_).negate(); }
 
     std::conditional_t<UsesBigInt, std::optional<int64_t>, int64_t>
     getint64() const noexcept {
@@ -459,6 +628,62 @@ public:
         } else {
             return value_;
         }
+    }
+
+    /// Returns the number of characters needed to represent the contained absolute value if it were to be printed
+    /// as a binary string. Note: `0` returns 1, `-1` returns 1, `3` returns 2, `-3` returns 2, etc.
+    size_t absValNumBits() const {
+        if constexpr (UsesBigInt) {
+            return value_.absValNumBits();
+        } else {
+            const uint64_t uval = value_ < 0 ? -static_cast<uint64_t>(value_) // safely cast to positive
+                                             :  static_cast<uint64_t>(value_);
+            return std::max(1, std::bit_width(uval));
+        }
+    }
+
+    /// Performs operator<<= on the underlying value_; returns true if the result is in consensus-legal range, false
+    /// otherwise. Note that unlike the safe*() functions, on a false return `value_` *may or may not* remain shifted,
+    /// in other words the effects of this function are not guaranteed to get rolled-back on a false return.
+    [[nodiscard]]
+    bool checkedLeftShift(unsigned const bitcount) {
+        if (!value_) return true; // fast-path; 0 left-shifted any number of bits is 0
+        if (bitcount + absValNumBits() > MAX_BITS) {
+            // would definitely fail, don't even bother
+            return false;
+        }
+        if constexpr (UsesBigInt) {
+            value_ <<= static_cast<unsigned long>(bitcount);
+        } else {
+            bool const neg = value_ < 0;
+            uint64_t const uval = neg ? -static_cast<uint64_t>(value_) // safely cast to positive
+                                      :  static_cast<uint64_t>(value_);
+            value_ = static_cast<int64_t>(uval << bitcount);
+            if (neg) value_ = -value_;
+        }
+        return validRange(value_); // should always return true here, but checked for paranoia
+    }
+
+    /// Performs operator>>= on the underlying value_; returns true if the result is in consensus-legal range, false
+    /// otherwise. Note that unlike the safe*() functions, on a false return `value_` *may or may not* remain shifted,
+    /// in other words the effects of this function are not guaranteed to get rolled-back on a false return.
+    ///
+    /// False return is only possible if the original value was already outside of consensus-legal range, and
+    /// the result of the right-shift did nothing to correct the situation.
+    [[nodiscard]]
+    bool checkedRightShift(unsigned const bitcount) {
+        if (!value_) return true; // fast path; 0 right-shifted any number of bits is 0
+        if constexpr (UsesBigInt) {
+            if (bitcount >= absValNumBits()) {
+                // Fast-path, excessive right-shift yields -1 for negative & 0 for positive numbers
+                value_ = value_.sign() < 0 ? -1 : 0;
+                return true;
+            }
+            value_ >>= static_cast<unsigned long>(bitcount);
+        } else {
+            value_ >>= std::min(bitcount, 63u);
+        }
+        return validRange(value_);
     }
 };
 
@@ -627,7 +852,7 @@ public:
         std::vector<uint8_t> result;
         const bool neg = value < 0;
         // NB: -INT64_MIN in 2's complement is UB, so we must guard against it here.
-        uint64_t absvalue = neg && valid64BitRange(value) ? -value : value;
+        uint64_t absvalue = neg && validRange(value) ? -value : value;
 
         while (absvalue) {
             result.push_back(absvalue & 0xff);
@@ -713,18 +938,11 @@ public:
     const BigInt &getBigInt() const { return value_; }
 
     // Promote these base class static protected methods to public (for tests, etc).
-    using ScriptIntBase::validBigIntRange;
+    using ScriptIntBase::validRange;
     using ScriptIntBase::bigIntConsensusMin;
     using ScriptIntBase::bigIntConsensusMax;
     using ScriptIntBase::MAXIMUM_ELEMENT_SIZE_BIG_INT;
-
-    /// Performs operator<<= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
-    [[nodiscard]]
-    bool checkedLeftShift(unsigned long bitcount) { return validBigIntRange(value_.operator<<=(bitcount)); }
-
-    /// Performs operator>>= on the underlying BigInt; returns true if the result is in consensus-legal range, false otherwise.
-    [[nodiscard]]
-    bool checkedRightShift(unsigned long bitcount) { return validBigIntRange(value_.operator>>=(bitcount)); }
+    using ScriptIntBase::MAX_BITS;
 
 private:
     // Called by ScriptNumCommon::fromBytes
@@ -733,6 +951,119 @@ private:
         ret.unserialize(vch);
         return ret;
     }
+};
+
+/**
+ * This is a union type of CScriptNum and ScriptBigInt which encapsulates the functionality of the two classes in
+ * a single wrapper class. The functionality encapsulated is that which is used by the script interpreter in EvalScript
+ * (interpreter.cpp) for working with script numbers. This class is an optimization to provide fast native int64_t math
+ * for small ints and to provide for auto-switching to BigInt for larger integers when calculations exceed the range
+ * [INT64_MIN + 1, INT64_MAX] (inclusive).
+ */
+class FastBigNum : public ScriptNumEncoding {
+    std::variant<CScriptNum, ScriptBigInt> var;
+
+    explicit FastBigNum(CScriptNum &&csn) : var{std::move(csn)} {}
+    explicit FastBigNum(ScriptBigInt &&sbi) : var{std::move(sbi)} {}
+
+    // Switches `var` to use ScriptBigInt (if it is not already doing so), preserving the stored value.
+    ScriptBigInt &ensureScriptBigInt();
+
+    // Member function pointer to: CScriptNum that accepts a CScriptNum and returns an optonal
+    using CSN_Mem_Fn = std::optional<CScriptNum> (CScriptNum::*)(const CScriptNum &) const;
+    // Member function pointer to: ScriptBigInt that accepts a BigInt and returns a bool
+    using SBI_Mem_Fn = bool (ScriptBigInt::*)(const BigInt &);
+    // Member function pointer to: ScriptBigInt that accepts an int64_t and returns a bool
+    using SBI_Mem_Fn_I64 = bool (ScriptBigInt::*)(int64_t);
+    // Generic helper for the safe*() public arith ops functions that does the proper juggling of arith. on mixed types
+    bool doInPlaceSafeArithOp(const FastBigNum &o, CSN_Mem_Fn csnMemFn, SBI_Mem_Fn sbiMemFn, SBI_Mem_Fn_I64 sbiMemFnI64);
+
+    // Member function pointer to: CScriptNum that accepts a CScriptNum and returns non-const CScriptNum &
+    using CSN_Mem_Fn_2 = CScriptNum& (CScriptNum::*)(const CScriptNum &);
+    // Member function pointer to: ScriptBigInt that accepts a BigInt and returns non-const ScriptBigInt &
+    using SBI_Mem_Fn_2 = ScriptBigInt& (ScriptBigInt::*)(const BigInt &);
+    // Member function pointer to: ScriptBigInt that accepts an int64_t and returns non-const ScriptBigInt &
+    using SBI_Mem_Fn_2_I64 = ScriptBigInt& (ScriptBigInt::*)(int64_t);
+    // Generic helper for some public arith ops functions that does the proper juggling of arith. on mixed types
+    FastBigNum &doInPlaceArithOp(const FastBigNum &o, CSN_Mem_Fn_2 csnMemFn, SBI_Mem_Fn_2 sbiMemFn, SBI_Mem_Fn_2_I64 sbiMemFnI64);
+
+    // Quickly returns whether the contained value is 0 or not (faster than operator==(0))
+    bool isZero() const;
+
+public:
+    // Construct from a serialized byte vector as would come in from the script interpreter. Auto-selects the correct
+    // size based on the size of the input vch and `maxIntegerSize`. Throws on error (as do the underlying CScriptNum
+    // and ScriptBigInt classes).
+    FastBigNum(const std::vector<uint8_t> &vch, bool fRequireMinimal, size_t maxIntegerSize);
+
+    static FastBigNum fromIntUnchecked(int64_t x) {
+        if (auto opt = CScriptNum::fromInt(x)) {
+            return FastBigNum(std::move(*opt));
+        } else {
+            // `x` == INT64_MIN, use BigInt instead
+            return FastBigNum(ScriptBigInt::fromIntUnchecked(x));
+        }
+    }
+
+    int32_t getint32() const { return std::visit([](const auto &num){ return num.getint32(); }, var); }
+
+    std::optional<int64_t> getint64() const {
+        return std::visit([](const auto &num) -> std::optional<int64_t> { return num.getint64(); }, var);
+    }
+
+    std::vector<uint8_t> getvch() const { return std::visit([](const auto &num){ return num.getvch(); }, var); }
+
+    [[nodiscard]] bool safeAddInPlace(const FastBigNum &o) {
+        return doInPlaceSafeArithOp(o, &CScriptNum::safeAdd, &ScriptBigInt::safeAddInPlace, &ScriptBigInt::safeAddInPlace);
+    }
+    [[nodiscard]] bool safeIncr() { return safeAddInPlace(FastBigNum::fromIntUnchecked(1)); }
+    [[nodiscard]] bool safeSubInPlace(const FastBigNum &o) {
+        return doInPlaceSafeArithOp(o, &CScriptNum::safeSub, &ScriptBigInt::safeSubInPlace, &ScriptBigInt::safeSubInPlace);
+    }
+    [[nodiscard]] bool safeDecr() { return safeSubInPlace(FastBigNum::fromIntUnchecked(1)); }
+    [[nodiscard]] bool safeMulInPlace(const FastBigNum &o) {
+        return doInPlaceSafeArithOp(o, &CScriptNum::safeMul, &ScriptBigInt::safeMulInPlace, &ScriptBigInt::safeMulInPlace);
+    }
+
+    FastBigNum &operator/=(const FastBigNum &o) {
+        if (o.isZero()) throw std::invalid_argument("Attempted division by 0 in FastBigNum::operator/=");
+        return doInPlaceArithOp(o, &CScriptNum::operator/=, &ScriptBigInt::operator/=, &ScriptBigInt::operator/=);
+    }
+
+    FastBigNum &operator%=(const FastBigNum &o) {
+        if (o.isZero()) throw std::invalid_argument("Attempted modulo by 0 in FastBigNum::operator%=");
+        return doInPlaceArithOp(o, &CScriptNum::operator%=, &ScriptBigInt::operator%=, &ScriptBigInt::operator%=);
+    }
+
+    FastBigNum &negate() { std::visit([](auto &bn) { bn.negate(); }, var); return *this; }
+
+    size_t absValNumBits() const { return std::visit([](const auto &num){ return num.absValNumBits(); }, var); }
+
+    [[nodiscard]] bool checkedLeftShift(unsigned bitcount);
+
+    [[nodiscard]] bool checkedRightShift(unsigned bitcount) {
+        return std::visit([bitcount](auto &num){ return num.checkedRightShift(bitcount); }, var);
+    }
+
+    std::strong_ordering operator<=>(const FastBigNum &o) const;
+
+    std::strong_ordering operator<=>(const int64_t val) const {
+        return *this <=> FastBigNum(CScriptNum::fromIntUnchecked(val));
+    }
+
+    bool operator==(const FastBigNum &o) const { return (*this <=> o) == 0; }
+    bool operator!=(const FastBigNum &o) const { return (*this <=> o) != 0; }
+    bool operator<=(const FastBigNum &o) const { return (*this <=> o) <= 0; }
+    bool operator< (const FastBigNum &o) const { return (*this <=> o) <  0; }
+    bool operator> (const FastBigNum &o) const { return (*this <=> o) >  0; }
+    bool operator>=(const FastBigNum &o) const { return (*this <=> o) >= 0; }
+
+    bool operator==(const int64_t o) const { return (*this <=> o) == 0; }
+    bool operator!=(const int64_t o) const { return (*this <=> o) != 0; }
+    bool operator<=(const int64_t o) const { return (*this <=> o) <= 0; }
+    bool operator< (const int64_t o) const { return (*this <=> o) <  0; }
+    bool operator> (const int64_t o) const { return (*this <=> o) >  0; }
+    bool operator>=(const int64_t o) const { return (*this <=> o) >= 0; }
 };
 
 /**

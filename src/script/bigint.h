@@ -190,24 +190,80 @@ public:
     BigInt &operator/=(const BigInt &o);
     BigInt &operator%=(const BigInt &o);
 
-    friend BigInt operator+(const BigInt &a, const BigInt &b) { BigInt r(a); return r += b; }
-    friend BigInt operator-(const BigInt &a, const BigInt &b) { BigInt r(a); return r -= b; }
-    friend BigInt operator*(const BigInt &a, const BigInt &b) { BigInt r(a); return r *= b; }
-    friend BigInt operator/(const BigInt &a, const BigInt &b) { BigInt r(a); return r /= b; }
-    friend BigInt operator%(const BigInt &a, const BigInt &b) { BigInt r(a); return r %= b; }
+    // Support for in-place arith ops using native operands (faster than working with BigInt as the rhs operand)
+    BigInt &operator+=(long long);
+    BigInt &operator-=(long long);
+    BigInt &operator*=(long long);
+    BigInt &operator/=(long long);
+    BigInt &operator%=(long long);
+    BigInt &operator+=(unsigned long long);
+    BigInt &operator-=(unsigned long long);
+    BigInt &operator*=(unsigned long long);
+    BigInt &operator/=(unsigned long long);
+    BigInt &operator%=(unsigned long long);
+    friend inline BigInt operator+(const BigInt &a, long long x) { BigInt r(a); r += x; return r; }
+    friend inline BigInt operator-(const BigInt &a, long long x) { BigInt r(a); r -= x; return r; }
+    friend inline BigInt operator*(const BigInt &a, long long x) { BigInt r(a); r *= x; return r; }
+    friend inline BigInt operator/(const BigInt &a, long long x) { BigInt r(a); r /= x; return r; }
+    friend inline BigInt operator%(const BigInt &a, long long x) { BigInt r(a); r %= x; return r; }
+    friend inline BigInt operator+(const BigInt &a, unsigned long long x) { BigInt r(a); r += x; return r; }
+    friend inline BigInt operator-(const BigInt &a, unsigned long long x) { BigInt r(a); r -= x; return r; }
+    friend inline BigInt operator*(const BigInt &a, unsigned long long x) { BigInt r(a); r *= x; return r; }
+    friend inline BigInt operator/(const BigInt &a, unsigned long long x) { BigInt r(a); r /= x; return r; }
+    friend inline BigInt operator%(const BigInt &a, unsigned long long x) { BigInt r(a); r %= x; return r; }
+
+#define DECLARE_NATIVE_ARITH_OP1(OP1, OP2, STYPE, DTYPE) \
+    BigInt &operator OP1(STYPE x) { return this->operator OP1(static_cast<DTYPE>(x)); } \
+    friend inline BigInt operator OP2(const BigInt &a, STYPE x) { BigInt r(a); r OP1 x; return r; }
+#define DECLARE_NATIVE_ARITH_OP(OP, TYPE) \
+    DECLARE_NATIVE_ARITH_OP1(OP ## =, OP, signed TYPE, long long) \
+    DECLARE_NATIVE_ARITH_OP1(OP ## =, OP, unsigned TYPE, unsigned long long)
+    // + +=
+    DECLARE_NATIVE_ARITH_OP(+, long)
+    DECLARE_NATIVE_ARITH_OP(+, short)
+    DECLARE_NATIVE_ARITH_OP(+, int)
+    DECLARE_NATIVE_ARITH_OP(+, char)
+    // - -=
+    DECLARE_NATIVE_ARITH_OP(-, long)
+    DECLARE_NATIVE_ARITH_OP(-, short)
+    DECLARE_NATIVE_ARITH_OP(-, int)
+    DECLARE_NATIVE_ARITH_OP(-, char)
+    // * *=
+    DECLARE_NATIVE_ARITH_OP(*, long)
+    DECLARE_NATIVE_ARITH_OP(*, short)
+    DECLARE_NATIVE_ARITH_OP(*, int)
+    DECLARE_NATIVE_ARITH_OP(*, char)
+    // / /=
+    DECLARE_NATIVE_ARITH_OP(/, long)
+    DECLARE_NATIVE_ARITH_OP(/, short)
+    DECLARE_NATIVE_ARITH_OP(/, int)
+    DECLARE_NATIVE_ARITH_OP(/, char)
+    // % %=
+    DECLARE_NATIVE_ARITH_OP(%, long)
+    DECLARE_NATIVE_ARITH_OP(%, short)
+    DECLARE_NATIVE_ARITH_OP(%, int)
+    DECLARE_NATIVE_ARITH_OP(%, char)
+#undef DECLARE_NATIVE_ARITH_OP
+#undef DECLARE_NATIVE_ARITH_OP1
+
+    friend inline BigInt operator+(const BigInt &a, const BigInt &b) { BigInt r(a); r += b; return r; }
+    friend inline BigInt operator-(const BigInt &a, const BigInt &b) { BigInt r(a); r -= b; return r; }
+    friend inline BigInt operator*(const BigInt &a, const BigInt &b) { BigInt r(a); r *= b; return r; }
+    friend inline BigInt operator/(const BigInt &a, const BigInt &b) { BigInt r(a); r /= b; return r; }
+    friend inline BigInt operator%(const BigInt &a, const BigInt &b) { BigInt r(a); r %= b; return r; }
 
     BigInt &operator|=(const BigInt &o); // bitwise or
     BigInt &operator&=(const BigInt &o); // bitwise and
     BigInt &operator^=(const BigInt &o); // bitwise xor
 
-    friend BigInt operator|(const BigInt &a, const BigInt &b) { BigInt r(a); return r |= b; }
-    friend BigInt operator&(const BigInt &a, const BigInt &b) { BigInt r(a); return r &= b; }
-    friend BigInt operator^(const BigInt &a, const BigInt &b) { BigInt r(a); return r ^= b; }
+    friend inline BigInt operator|(const BigInt &a, const BigInt &b) { BigInt r(a); r |= b; return r; }
+    friend inline BigInt operator&(const BigInt &a, const BigInt &b) { BigInt r(a); r &= b; return r; }
+    friend inline BigInt operator^(const BigInt &a, const BigInt &b) { BigInt r(a); r ^= b; return r; }
 
     BigInt &operator<<=(unsigned long); // left-shift
     BigInt &operator>>=(unsigned long); // right-shift
-    BigInt  operator<<(unsigned long n) const { BigInt r(*this); return r <<= n; }
-    BigInt  operator>>(unsigned long n) const { BigInt r(*this); return r >>= n; }
+    BigInt  operator<<(unsigned long n) const { BigInt r(*this); r <<= n; return r; }
+    BigInt  operator>>(unsigned long n) const { BigInt r(*this); r >>= n; return r; }
 
     BigInt operator-() const { BigInt ret(*this); ret.negate(); return ret; } // sign negate
 
@@ -287,6 +343,8 @@ private:
     template<typename I> std::optional<I> getIntImpl() const noexcept;
     template<typename I> void setIntImpl(I);
     template<typename I> int compareImpl(I) const;
+    enum class ArithOpType { Add, Sub, Div, Mul, Mod };
+    template <typename I> BigInt &applyArithOp(ArithOpType, I);
 
 public:
     // Random number generation (wrapper around gmp_randclass & FastRandomContext). This random generator is for tests

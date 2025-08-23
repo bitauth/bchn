@@ -420,6 +420,13 @@ void BigInt::unserialize(Span<const uint8_t> b) {
     }
 
     const bool neg = b.back() & 0x80u; // save sign bit
+    if (b.size() == 1) {
+        // fast-path for tiny single-byte ints
+        long val = static_cast<long>(b.back() & 0x7fu); // take value without sign bit
+        if (neg) val = -val; // apply sign, if any
+        p().base() = val;
+        return;
+    }
     std::vector<uint8_t> tmp;
     const size_t extraBytes = b.size() % ULSz ? ULSz - (b.size() % ULSz) : 0u;
     Span<const uint8_t> data; // may point to either `tmp` or `b`
@@ -524,6 +531,64 @@ BigInt &BigInt::operator/=(const BigInt &o) {
     p().base() /= o.m_p->base();
     return *this;
 }
+
+template <typename I>
+BigInt &BigInt::applyArithOp(const ArithOpType op, const I x) {
+    using enum ArithOpType;
+    // Check for early return if no-op, or if division by zero, throw
+    switch (op) {
+        case Add:
+        case Sub:
+            if (!x) return *this; // Add/Sub 0. Nothing to do. Bail early
+            break;
+        case Div:
+        case Mod:
+            if (!x) throw std::invalid_argument("Attempted division or modulo by 0");
+            [[fallthrough]];
+        case Mul:
+            // If we are 0, or if x is 1 and we are not doing mod then no-op; bail early
+            if (!m_p || !sign() || (op != Mod && x == I{1})) return *this;
+            // If multiplying by 0, or modding by 1, just set us to zero and bail early to save cycles
+            else if ((!x && op == Mul) || (x == I{1} && op == Mod)) {
+                m_p.reset(); // clearing m_p is logically equivalent to 0
+                return *this;
+            }
+            break;
+    }
+    using LongOrULong = std::conditional_t<std::is_signed_v<I>, long, unsigned long>;
+    if (NumFits<LongOrULong>(x)) {
+        // `x` fits inside (unsigned) long; this branch taken on most platforms (LP64)
+        mpz_class &mpz = p().base();
+        switch (op) {
+            case Add: mpz += static_cast<LongOrULong>(x); break;
+            case Sub: mpz -= static_cast<LongOrULong>(x); break;
+            case Div: mpz /= static_cast<LongOrULong>(x); break;
+            case Mul: mpz *= static_cast<LongOrULong>(x); break;
+            case Mod: mpz %= static_cast<LongOrULong>(x); break;
+        }
+    } else {
+        // `x` doesn't fit. Must cast to BigInt (slower). This branch may be taken on LLP64 (Windows).
+        switch (op) {
+            case Add: this->operator+=(BigInt(x)); break;
+            case Sub: this->operator-=(BigInt(x)); break;
+            case Div: this->operator/=(BigInt(x)); break;
+            case Mul: this->operator*=(BigInt(x)); break;
+            case Mod: this->operator%=(BigInt(x)); break;
+        }
+    }
+    return *this;
+}
+
+BigInt &BigInt::operator+=(long long x) { return applyArithOp(ArithOpType::Add, x); }
+BigInt &BigInt::operator-=(long long x) { return applyArithOp(ArithOpType::Sub, x); }
+BigInt &BigInt::operator*=(long long x) { return applyArithOp(ArithOpType::Mul, x); }
+BigInt &BigInt::operator/=(long long x) { return applyArithOp(ArithOpType::Div, x); }
+BigInt &BigInt::operator%=(long long x) { return applyArithOp(ArithOpType::Mod, x); }
+BigInt &BigInt::operator+=(unsigned long long x) { return applyArithOp(ArithOpType::Add, x); }
+BigInt &BigInt::operator-=(unsigned long long x) { return applyArithOp(ArithOpType::Sub, x); }
+BigInt &BigInt::operator*=(unsigned long long x) { return applyArithOp(ArithOpType::Mul, x); }
+BigInt &BigInt::operator/=(unsigned long long x) { return applyArithOp(ArithOpType::Div, x); }
+BigInt &BigInt::operator%=(unsigned long long x) { return applyArithOp(ArithOpType::Mod, x); }
 
 BigInt &BigInt::operator%=(const BigInt &o) {
     if (!o.m_p || o == 0) throw std::invalid_argument("Attempted modulo by 0 in BigInt::operator%=");

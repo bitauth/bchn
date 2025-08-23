@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <any>
 #include <cassert>
 #include <chrono>
 #include <functional>
@@ -51,6 +52,10 @@ using time_point = clock::time_point;
 using duration = clock::duration;
 
 class Printer;
+class State;
+
+using BenchFunction = std::function<void(State &)>;
+using CompletionFunction = std::function<void(const State &, Printer &)>;
 
 class State {
     std::string m_name;
@@ -71,9 +76,10 @@ public:
 
     void UpdateTimer(const time_point &finish_time);
 
-    State(const std::string &name, uint64_t num_iters, Printer &)
+    State(const std::string &name, uint64_t num_iters, Printer &, CompletionFunction &f)
         : m_name(name),
-          m_num_iters(num_iters) {}
+          m_num_iters(num_iters),
+          completionFunction(f) {}
 
     void StartBenchmark() {
         /// Mark the benchmark as starting - do this after setup, immediately on entering the loop
@@ -101,11 +107,14 @@ public:
     double GetMax() const { assert(m_calced_stats); return m_max; }
     double GetMedian() const { assert(m_calced_stats); return m_median; }
 
+    // The completion function which is to be run once after all evalauations complete. You can modify this value
+    // to set the function. This is a reference to the runner's BenchRunner::Bench::CompletionFunction.
+    CompletionFunction &completionFunction;
+    // std::any object which a benchmark can use to store extra stats, etc, which should persist across evaluations.
+    std::any anyData;
+
     friend class BenchRunner;
 };
-
-using BenchFunction = std::function<void(State &)>;
-using CompletionFunction = std::function<void(const State &, Printer &)>;
 
 class BenchRunner {
     struct Bench {
@@ -138,7 +147,7 @@ public:
     using ExtraData = std::vector<std::pair<std::string, std::string>>; // name-value pairs
 
     // Call this from a completion function to append a row to the supplemental table for a benchmark category.
-    // For an example of a suite of benches that uses this mechanism, see: libauth_bench.cpp
+    // For an example of a suite of benches that uses this mechanism, see: libauth_bench.cpp and verify_script.cpp
     void appendExtraDataForCategory(const std::string &categoryName, ExtraData data) {
         extraDataByCategory[categoryName].push_back(std::move(data));
     }

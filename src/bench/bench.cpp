@@ -145,7 +145,7 @@ void BenchRunner::RunAll(Printer &printer, uint64_t num_evals,
     printer.header();
 
     std::optional<TestingSetup> optTestSetup;
-    for (const auto &[name, bench] : benchmarks()) {
+    for (auto &[name, bench] : benchmarks()) {
         if (!internalFilter.empty() && !std::regex_search(name, reFilterInternal)) {
             continue;
         }
@@ -160,7 +160,7 @@ void BenchRunner::RunAll(Printer &printer, uint64_t num_evals,
             continue;
         }
 
-        State state(name, num_iters, printer);
+        State state(name, num_iters, printer, bench.completionFunc);
         for (uint64_t i = 0; i != num_evals; ++i) {
             if (!optTestSetup || !bench.reuseChain) {
                 // (re)set the chain for this eval

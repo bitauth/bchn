@@ -1,8 +1,13 @@
 // Copyright (c) 2012-2015 The Bitcoin Core developers
-// Copyright (c) 2021-2024 The Bitcoin developers
+// Copyright (c) 2021-2025 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#if HAVE_CONFIG_H
+#include <config/bitcoin-config.h>
+#endif
+
+#include <random.h>
 #include <script/script.h>
 
 #include <test/scriptnum10.h>
@@ -10,8 +15,11 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <bit>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
+#include <iterator>
 
 BOOST_FIXTURE_TEST_SUITE(scriptnum_tests, BasicTestingSetup)
 
@@ -35,15 +43,17 @@ static const int64_t values[] = {0,
                                  1LL << 40,
                                  int64_t_min_8_bytes,
                                  int64_t_min,
-                                 int64_t_max};
+                                 int64_t_max,
+                                 int64_t_max - 1};
 
 static const int64_t offsets[] = {1, 0x79, 0x80, 0x81, 0xFF, 0x7FFF, 0x8000, 0xFFFF, 0x10000};
 
 template <typename ScriptNumType>
-std::enable_if_t<std::is_same_v<ScriptNumType, CScriptNum> || std::is_same_v<ScriptNumType, ScriptBigInt>, bool>
+std::enable_if_t<std::is_same_v<ScriptNumType, CScriptNum>
+                     || std::is_same_v<ScriptNumType, ScriptBigInt>
+                     || std::is_same_v<ScriptNumType, FastBigNum>, bool>
 /* bool */ verify(const CScriptNum10 &bignum, const ScriptNumType &scriptnum) {
-    return bignum.getvch() == scriptnum.getvch() &&
-           bignum.getint() == scriptnum.getint32();
+    return bignum.getvch() == scriptnum.getvch() && bignum.getint() == scriptnum.getint32();
 }
 
 static
@@ -55,18 +65,24 @@ void CheckCreateVchOldRules(int64_t x) {
     BOOST_CHECK(verify(bigx, scriptx));
     auto const scriptx2 = ScriptBigInt::fromIntUnchecked(x);
     BOOST_CHECK(verify(bigx, scriptx2));
+    auto const scriptx2_fbn = FastBigNum::fromIntUnchecked(x);
+    BOOST_CHECK(verify(bigx, scriptx2_fbn));
 
     CScriptNum10 bigb(bigx.getvch(), false);
     CScriptNum scriptb(scriptx.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigb, scriptb));
     ScriptBigInt scriptb2(scriptx2.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigb, scriptb2));
+    FastBigNum scriptb2_fbn(scriptx2_fbn.getvch(), false, maxIntegerSize);
+    BOOST_CHECK(verify(bigb, scriptb2_fbn));
 
     CScriptNum10 bigx3(scriptb.getvch(), false);
     CScriptNum scriptx3(bigb.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigx3, scriptx3));
     ScriptBigInt scriptx3_2(bigb.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigx3, scriptx3_2));
+    FastBigNum scriptx3_2_fbn(bigb.getvch(), false, maxIntegerSize);
+    BOOST_CHECK(verify(bigx3, scriptx3_2_fbn));
 }
 
 static
@@ -82,22 +98,28 @@ void CheckCreateVchNewRules(int64_t x) {
     }
     auto const scriptx = *res;
     auto const scriptx2 = *res2;
+    auto const scriptx_fbn = FastBigNum::fromIntUnchecked(x);
 
     CScriptNum10 bigx(x);
     BOOST_CHECK(verify(bigx, scriptx));
     BOOST_CHECK(verify(bigx, scriptx2));
+    BOOST_CHECK(verify(bigx, scriptx_fbn));
 
     CScriptNum10 bigb(bigx.getvch(), false, maxIntegerSize);
     CScriptNum scriptb(scriptx.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigb, scriptb));
     ScriptBigInt scriptb2(scriptx2.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigb, scriptb2));
+    FastBigNum scriptb_fbn(scriptx_fbn.getvch(), false, maxIntegerSize);
+    BOOST_CHECK(verify(bigb, scriptb_fbn));
 
     CScriptNum10 bigx3(scriptb.getvch(), false, maxIntegerSize);
     CScriptNum scriptx3(bigb.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigx3, scriptx3));
     ScriptBigInt scriptx3_2(bigb.getvch(), false, maxIntegerSize);
     BOOST_CHECK(verify(bigx3, scriptx3_2));
+    FastBigNum scriptx3_2_fbn(bigb.getvch(), false, maxIntegerSize);
+    BOOST_CHECK(verify(bigx3, scriptx3_2_fbn));
 }
 
 static
@@ -105,16 +127,22 @@ void CheckCreateIntOldRules(int64_t x) {
     auto const scriptx = CScriptNum::fromIntUnchecked(x);
     CScriptNum10 const bigx(x);
     auto const scriptx2 = ScriptBigInt ::fromIntUnchecked(x);
+    auto const scriptx2_fbn = FastBigNum ::fromIntUnchecked(x);
     BOOST_CHECK(verify(bigx, scriptx));
     BOOST_CHECK(verify(bigx, scriptx2));
+    BOOST_CHECK(verify(bigx, scriptx2_fbn));
     BOOST_CHECK(verify(CScriptNum10(bigx.getint()), CScriptNum::fromIntUnchecked(scriptx.getint32())));
     BOOST_CHECK(verify(CScriptNum10(bigx.getint()), ScriptBigInt::fromIntUnchecked(scriptx2.getint32())));
+    BOOST_CHECK(verify(CScriptNum10(bigx.getint()), FastBigNum::fromIntUnchecked(scriptx2_fbn.getint32())));
     BOOST_CHECK(verify(CScriptNum10(scriptx.getint32()), CScriptNum::fromIntUnchecked(bigx.getint())));
     BOOST_CHECK(verify(CScriptNum10(scriptx2.getint32()), ScriptBigInt::fromIntUnchecked(bigx.getint())));
+    BOOST_CHECK(verify(CScriptNum10(scriptx2_fbn.getint32()), FastBigNum::fromIntUnchecked(bigx.getint())));
     BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx.getint32()).getint()),
                        CScriptNum::fromIntUnchecked(CScriptNum::fromIntUnchecked(bigx.getint()).getint32())));
     BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx.getint32()).getint()),
                        ScriptBigInt::fromIntUnchecked(ScriptBigInt::fromIntUnchecked(bigx.getint()).getint32())));
+    BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx.getint32()).getint()),
+                       FastBigNum::fromIntUnchecked(FastBigNum::fromIntUnchecked(bigx.getint()).getint32())));
 }
 
 static
@@ -128,18 +156,24 @@ void CheckCreateIntNewRules(int64_t x) {
     }
     auto const scriptx = *res;
     auto const scriptx2 = *res2;
+    auto const scriptx2_fbn = FastBigNum::fromIntUnchecked(x);
 
     CScriptNum10 const bigx(x);
     BOOST_CHECK(verify(bigx, scriptx));
     BOOST_CHECK(verify(bigx, scriptx2));
+    BOOST_CHECK(verify(bigx, scriptx2_fbn));
     BOOST_CHECK(verify(CScriptNum10(bigx.getint()), CScriptNum::fromIntUnchecked(scriptx.getint32())));
     BOOST_CHECK(verify(CScriptNum10(bigx.getint()), ScriptBigInt::fromIntUnchecked(scriptx2.getint32())));
+    BOOST_CHECK(verify(CScriptNum10(bigx.getint()), FastBigNum::fromIntUnchecked(scriptx2_fbn.getint32())));
     BOOST_CHECK(verify(CScriptNum10(scriptx.getint32()), CScriptNum::fromIntUnchecked(bigx.getint())));
     BOOST_CHECK(verify(CScriptNum10(scriptx2.getint32()), ScriptBigInt::fromIntUnchecked(bigx.getint())));
+    BOOST_CHECK(verify(CScriptNum10(scriptx2.getint32()), FastBigNum::fromIntUnchecked(bigx.getint())));
     BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx.getint32()).getint()),
                        CScriptNum::fromIntUnchecked(CScriptNum::fromIntUnchecked(bigx.getint()).getint32())));
     BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx2.getint32()).getint()),
                        ScriptBigInt::fromIntUnchecked(ScriptBigInt::fromIntUnchecked(bigx.getint()).getint32())));
+    BOOST_CHECK(verify(CScriptNum10(CScriptNum10(scriptx2_fbn.getint32()).getint()),
+                       FastBigNum::fromIntUnchecked(FastBigNum::fromIntUnchecked(bigx.getint()).getint32())));
 }
 
 static
@@ -154,6 +188,8 @@ void CheckAddOldRules(int64_t a, int64_t b) {
     auto const scriptb = CScriptNum::fromIntUnchecked(b);
     auto const scripta2 = ScriptBigInt::fromIntUnchecked(a);
     auto const scriptb2 = ScriptBigInt::fromIntUnchecked(b);
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
 
     // int64_t overflow is undefined.
     bool overflowing = (b > 0 && a > int64_t_max - b) ||
@@ -162,22 +198,34 @@ void CheckAddOldRules(int64_t a, int64_t b) {
     if ( ! overflowing) {
         auto res = scripta.safeAdd(scriptb);
         auto res2 = scripta2.safeAdd(scriptb2);
+        auto a_fbn = scripta_fbn, b_fbn = scriptb_fbn; // copy
+        BOOST_CHECK(a_fbn.safeAddInPlace(b_fbn));
         BOOST_CHECK(res);
         BOOST_CHECK(res2);
         BOOST_CHECK(verify(biga + bigb, *res));
         BOOST_CHECK(verify(biga + bigb, *res2));
+        BOOST_CHECK(verify(biga + bigb, a_fbn));
+        if (b == 1 || b == -1) {
+            // test safeIncr() / safeDecr()
+            a_fbn = scripta_fbn; // restore
+            BOOST_CHECK(b == 1 ? a_fbn.safeIncr() : a_fbn.safeDecr());
+            BOOST_CHECK(verify(biga + bigb, a_fbn));
+        }
         res = scripta.safeAdd(b);
         res2 = scripta2.safeAdd(b);
         BOOST_CHECK(res);
         BOOST_CHECK(res2);
         BOOST_CHECK(verify(biga + bigb, *res));
         BOOST_CHECK(verify(biga + bigb, *res2));
+        a_fbn = scripta_fbn; // restore
         res = scriptb.safeAdd(scripta);
         res2 = scriptb2.safeAdd(scripta2);
+        BOOST_CHECK(b_fbn.safeAddInPlace(a_fbn));
         BOOST_CHECK(res);
         BOOST_CHECK(res2);
         BOOST_CHECK(verify(biga + bigb, *res));
         BOOST_CHECK(verify(biga + bigb, *res2));
+        BOOST_CHECK(verify(biga + bigb, b_fbn));
         res = scriptb.safeAdd(a);
         res2 = scriptb2.safeAdd(a);
         BOOST_CHECK(res);
@@ -192,6 +240,8 @@ void CheckAddOldRules(int64_t a, int64_t b) {
         BOOST_CHECK(scripta2.safeAdd(scriptb2));
         BOOST_CHECK(scripta2.safeAdd(b));
         BOOST_CHECK(scriptb2.safeAdd(a));
+        BOOST_CHECK(FastBigNum(scripta_fbn).safeAddInPlace(scriptb_fbn));
+        BOOST_CHECK(FastBigNum(scriptb_fbn).safeAddInPlace(scripta_fbn));
     }
 }
 
@@ -207,6 +257,7 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     }
     auto const scripta = *res;
     auto const scripta2 = *res2;
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
 
     res = CScriptNum::fromInt(b);
     res2 = ScriptBigInt::fromInt(b);
@@ -217,6 +268,7 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     }
     auto const scriptb = *res;
     auto const scriptb2 = *res2;
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
 
     bool overflowing = (b > 0 && a > int64_t_max - b) ||
                        (b < 0 && a < int64_t_min_8_bytes - b);
@@ -225,8 +277,18 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     BOOST_CHECK(bool(res) != overflowing);
     BOOST_CHECK( ! res || a + b == res->getint64());
     res2 = scripta2.safeAdd(scriptb2);
-    BOOST_CHECK(bool(res2));
+    BOOST_REQUIRE(bool(res2));
     BOOST_CHECK(BigInt(a) + b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) + BigInt(b) == res2->getBigInt());
+    BOOST_CHECK( ! res || res->getvch() == res2->getvch());
+
+    // Check FastBigNum
+    auto a_fbn = scripta_fbn, b_fbn = scriptb_fbn; // take copy
+    BOOST_CHECK(a_fbn.safeAddInPlace(b_fbn));
+    BOOST_CHECK(res2->getvch() == a_fbn.getvch());
+    a_fbn = scripta_fbn; // restore original
+    BOOST_CHECK(b_fbn.safeAddInPlace(a_fbn)); // add in reverse
+    BOOST_CHECK(res2->getvch() == b_fbn.getvch());
 
     res = scripta.safeAdd(b);
     BOOST_CHECK(bool(res) != overflowing);
@@ -234,6 +296,7 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     res2 = scripta2.safeAdd(b);
     BOOST_CHECK(bool(res2));
     BOOST_CHECK(BigInt(a) + b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) + BigInt(b) == res2->getBigInt());
 
     res = scriptb.safeAdd(scripta);
     BOOST_CHECK(bool(res) != overflowing);
@@ -241,6 +304,7 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     res2 = scriptb2.safeAdd(scripta2);
     BOOST_CHECK(bool(res2));
     BOOST_CHECK(BigInt(b) + a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) + BigInt(a) == res2->getBigInt());
 
     res = scriptb.safeAdd(a);
     BOOST_CHECK(bool(res) != overflowing);
@@ -248,6 +312,7 @@ void CheckAddNewRules(int64_t a, int64_t b) {
     res2 = scriptb2.safeAdd(a);
     BOOST_CHECK(bool(res2));
     BOOST_CHECK(BigInt(b) + a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) + BigInt(a) == res2->getBigInt());
 }
 
 static
@@ -324,6 +389,8 @@ void CheckSubtractNewRules(int64_t a, int64_t b) {
     }
     auto const scripta = *res;
     auto const scripta2 = *res2;
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
+    BOOST_CHECK(scripta2.getvch() == scripta_fbn.getvch());
 
     res = CScriptNum::fromInt(b);
     res2 = ScriptBigInt::fromInt(b);
@@ -334,6 +401,8 @@ void CheckSubtractNewRules(int64_t a, int64_t b) {
     }
     auto const scriptb = *res;
     auto const scriptb2 = *res2;
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
+    BOOST_CHECK(scriptb2.getvch() == scriptb_fbn.getvch());
 
     bool overflowing = (b > 0 && a < int64_t_min_8_bytes + b) ||
                        (b < 0 && a > int64_t_max + b);
@@ -342,15 +411,23 @@ void CheckSubtractNewRules(int64_t a, int64_t b) {
     BOOST_CHECK(bool(res) != overflowing);
     BOOST_CHECK( ! res || a - b == res->getint64());
     res2 = scripta2.safeSub(scriptb2);
-    BOOST_CHECK(res2);
+    BOOST_REQUIRE(res2);
     BOOST_CHECK(BigInt(a) - b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) - BigInt(b) == res2->getBigInt());
+
+    // FastBigNum: a - b
+    auto a_fbn = scripta_fbn, b_fbn = scriptb_fbn; // take copy
+    BOOST_CHECK(a_fbn.safeSubInPlace(b_fbn));
+    BOOST_CHECK(res2->getvch() == a_fbn.getvch());
+    a_fbn = scripta_fbn; // restore
 
     res = scripta.safeSub(b);
     BOOST_CHECK(bool(res) != overflowing);
     BOOST_CHECK( ! res || a - b == res->getint64());
     res2 = scripta2.safeSub(b);
-    BOOST_CHECK(res2);
+    BOOST_REQUIRE(res2);
     BOOST_CHECK(BigInt(a) - b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) - BigInt(b) == res2->getBigInt());
 
     overflowing = (a > 0 && b < int64_t_min_8_bytes + a) ||
                   (a < 0 && b > int64_t_max + a);
@@ -359,8 +436,14 @@ void CheckSubtractNewRules(int64_t a, int64_t b) {
     BOOST_CHECK(bool(res) != overflowing);
     BOOST_CHECK( ! res || b - a == res->getint64());
     res2 = scriptb2.safeSub(scripta2);
-    BOOST_CHECK(res2);
+    BOOST_REQUIRE(res2);
     BOOST_CHECK(BigInt(b) - a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) - BigInt(a) == res2->getBigInt());
+
+    // FastBigNum: b - a
+    BOOST_CHECK(b_fbn.safeSubInPlace(a_fbn));
+    BOOST_CHECK(res2->getvch() == b_fbn.getvch());
+    b_fbn = scriptb_fbn; // restore
 
     res = scriptb.safeSub(a);
     BOOST_CHECK(bool(res) != overflowing);
@@ -368,6 +451,7 @@ void CheckSubtractNewRules(int64_t a, int64_t b) {
     res2 = scriptb2.safeSub(a);
     BOOST_CHECK(res2);
     BOOST_CHECK(BigInt(b) - a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) - BigInt(a) == res2->getBigInt());
 }
 
 static
@@ -381,6 +465,7 @@ void CheckMultiply(int64_t a, int64_t b) {
     }
     auto const scripta = *res;
     auto const scripta2 = *res2;
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
 
     res = CScriptNum::fromInt(b);
     res2 = ScriptBigInt::fromInt(b);
@@ -391,6 +476,7 @@ void CheckMultiply(int64_t a, int64_t b) {
     }
     auto const scriptb = *res;
     auto const scriptb2 = *res2;
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
 
     res = scripta.safeMul(scriptb);
     BOOST_CHECK( ! res || a * b == res->getint64());
@@ -402,13 +488,36 @@ void CheckMultiply(int64_t a, int64_t b) {
     BOOST_CHECK( ! res || b * a == res->getint64());
 
     res2 = scripta2.safeMul(scriptb2);
-    BOOST_CHECK(res2 && BigInt(a) * b == res2->getBigInt());
+    BOOST_REQUIRE(res2);
+    BOOST_CHECK(BigInt(a) * b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) * BigInt(b) == res2->getBigInt());
+
+    // Check FastBigNum: a * b
+    auto a_fbn = scripta_fbn; // take copy
+    BOOST_CHECK(a_fbn.safeMulInPlace(scriptb_fbn));
+    BOOST_CHECK(a_fbn.getvch() == res2->getvch());
+    a_fbn = scripta_fbn; // restore
+
     res2 = scripta2.safeMul(b);
-    BOOST_CHECK(res2 && BigInt(a) * b == res2->getBigInt());
+    BOOST_REQUIRE(res2);
+    BOOST_CHECK(BigInt(a) * b == res2->getBigInt());
+    BOOST_CHECK(BigInt(a) * BigInt(b) == res2->getBigInt());
+
     res2 = scriptb2.safeMul(scripta2);
-    BOOST_CHECK(res2 && BigInt(b) * a == res2->getBigInt());
+    BOOST_REQUIRE(res2);
+    BOOST_CHECK(BigInt(b) * a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) * BigInt(a) == res2->getBigInt());
+
+    // Check FastBigNum: b * a
+    auto b_fbn = scriptb_fbn; // take copy
+    BOOST_CHECK(b_fbn.safeMulInPlace(scripta_fbn));
+    BOOST_CHECK(b_fbn.getvch() == res2->getvch());
+    b_fbn = scripta_fbn; // restore
+
     res2 = scriptb2.safeMul(a);
-    BOOST_CHECK(res2 && BigInt(b) * a == res2->getBigInt());
+    BOOST_REQUIRE(res2);
+    BOOST_CHECK(BigInt(b) * a == res2->getBigInt());
+    BOOST_CHECK(BigInt(b) * BigInt(a) == res2->getBigInt());
 }
 
 static
@@ -483,6 +592,7 @@ void CheckDivideNewRules(int64_t a, int64_t b) {
     }
     auto const scripta = *res;
     auto const scripta2 = *res2;
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
 
     res = CScriptNum::fromInt(b);
     res2 = ScriptBigInt::fromInt(b);
@@ -493,6 +603,7 @@ void CheckDivideNewRules(int64_t a, int64_t b) {
     }
     auto const scriptb = *res;
     auto const scriptb2 = *res2;
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
 
     if (b != 0) { // Prevent divide by 0
         auto val = scripta / scriptb;
@@ -505,26 +616,127 @@ void CheckDivideNewRules(int64_t a, int64_t b) {
         auto opti = val2.getint64();
         BOOST_REQUIRE(opti);
         BOOST_CHECK(a / b == *opti);
-        val2 = scripta2 / b;
+        val2 = scripta2 / b; // int64_t based operator/
         opti = val2.getint64();
         BOOST_REQUIRE(opti);
         BOOST_CHECK(a / b == *opti);
+        val2 = scripta2 / BigInt(b); // BigInt based operator/
+        opti = val2.getint64();
+        BOOST_REQUIRE(opti);
+        BOOST_CHECK(a / b == *opti);
+
+        // Check FastBigNum
+        auto fbn = scripta_fbn;
+        fbn /= scriptb_fbn;
+        BOOST_CHECK(a / b == fbn.getint64().value());
+        BOOST_CHECK(fbn.getvch() == (scripta2 / scriptb2).getvch());
     } else {
         // BigInt-based impl will throw on divide-by-zero, so check that behavior.
         BOOST_CHECK_THROW(BigInt(a) / b, std::invalid_argument);
+        BOOST_CHECK_THROW(BigInt(a) / BigInt(b), std::invalid_argument);
         BOOST_CHECK_THROW(scripta2 / b, std::invalid_argument);
         BOOST_CHECK_THROW(scripta2 / scriptb2, std::invalid_argument);
+        BOOST_CHECK_THROW(FastBigNum(scripta_fbn) /= scriptb_fbn, std::invalid_argument);
     }
     if (a != 0) { // Prevent divide by 0
         auto val = scriptb / scripta;
         BOOST_CHECK(b / a == val.getint64());
         val = scriptb / a;
         BOOST_CHECK(b / a == val.getint64());
+
+        // Check BigInt also conforms (it has a slightly different interface for getint64())
+        auto val2 = scriptb2 / scripta2;
+        auto opti = val2.getint64();
+        BOOST_REQUIRE(opti);
+        BOOST_CHECK(b / a == *opti);
+
+        // Check FastBigNum
+        auto fbn = scriptb_fbn;
+        fbn /= scripta_fbn;
+        BOOST_CHECK(b / a == fbn.getint64().value());
+        BOOST_CHECK(fbn.getvch() == val2.getvch());
     } else {
         // BigInt-based impl will throw on divide-by-zero, so check that behavior.
         BOOST_CHECK_THROW(BigInt(b) / a, std::invalid_argument);
+        BOOST_CHECK_THROW(BigInt(b) / BigInt(a), std::invalid_argument);
         BOOST_CHECK_THROW(scriptb2 / a, std::invalid_argument);
+        BOOST_CHECK_THROW(scriptb2 / BigInt(a), std::invalid_argument);
         BOOST_CHECK_THROW(scriptb2 / scripta2, std::invalid_argument);
+        BOOST_CHECK_THROW(FastBigNum(scriptb_fbn) /= scripta_fbn, std::invalid_argument);
+    }
+}
+
+static
+void CheckModulo(int64_t a, int64_t b) {
+    auto res = ScriptBigInt::fromInt(a);
+    BOOST_REQUIRE(res);
+    auto const scripta = *res;
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
+
+    res = ScriptBigInt::fromInt(b);
+    BOOST_REQUIRE(res);
+    auto const scriptb = *res;
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
+
+    if (b != 0) { // Prevent divide by 0
+        auto val = scripta % scriptb;
+        auto val_fbn = scripta_fbn;
+        val_fbn %= scriptb_fbn;
+        auto opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        BOOST_CHECK(*opti == val_fbn.getint64().value());
+        BOOST_CHECK(val.getvch() == val_fbn.getvch());
+        if (a != int64_t_min || b != -1) BOOST_CHECK(a % b == *opti);
+        else BOOST_CHECK(0 == *opti);
+        BOOST_CHECK(BigInt(a) % b == *opti);
+        BOOST_CHECK(BigInt(a) % BigInt(b) == *opti);
+        val = scripta % b;
+        opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        if (a != int64_t_min || b != -1) BOOST_CHECK(a % b == *opti);
+        else BOOST_CHECK(0 == *opti);
+        val = scripta % BigInt(b);
+        opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        if (a != int64_t_min || b != -1) BOOST_CHECK(a % b == *opti);
+        else BOOST_CHECK(0 == *opti);
+    } else {
+        // BigInt-based impl will throw on divide-by-zero, so check that behavior.
+        BOOST_CHECK_THROW(BigInt(a) % b, std::invalid_argument);
+        BOOST_CHECK_THROW(BigInt(a) % BigInt(b), std::invalid_argument);
+        BOOST_CHECK_THROW(scripta % b, std::invalid_argument);
+        BOOST_CHECK_THROW(scripta % BigInt(b), std::invalid_argument);
+        BOOST_CHECK_THROW(scripta % scriptb, std::invalid_argument);
+        BOOST_CHECK_THROW(FastBigNum(scripta_fbn) %= scriptb_fbn, std::invalid_argument);
+    }
+    if (a != 0) { // Prevent divide by 0
+        auto val = scriptb % scripta;
+        auto val_fbn = scriptb_fbn;
+        val_fbn %= scripta_fbn;
+        auto opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        BOOST_CHECK(*opti == val_fbn.getint64().value());
+        BOOST_CHECK(val.getvch() == val_fbn.getvch());
+        if (b != int64_t_min || a != -1) BOOST_CHECK(b % a == *opti);
+        else BOOST_CHECK(0 == *opti);
+        val = scriptb % a;
+        opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        if (b != int64_t_min || a != -1) BOOST_CHECK(b % a == *opti);
+        else BOOST_CHECK(0 == *opti);
+        val = scriptb % BigInt(a);
+        opti = val.getint64();
+        BOOST_REQUIRE(opti);
+        if (b != int64_t_min || a != -1) BOOST_CHECK(b % a == *opti);
+        else BOOST_CHECK(0 == *opti);
+    } else {
+        // BigInt-based impl will throw on divide-by-zero, so check that behavior.
+        BOOST_CHECK_THROW(BigInt(b) % a, std::invalid_argument);
+        BOOST_CHECK_THROW(BigInt(b) % BigInt(a), std::invalid_argument);
+        BOOST_CHECK_THROW(scriptb % a, std::invalid_argument);
+        BOOST_CHECK_THROW(scriptb % BigInt(a), std::invalid_argument);
+        BOOST_CHECK_THROW(scriptb % scripta, std::invalid_argument);
+        BOOST_CHECK_THROW(FastBigNum(scriptb_fbn) %= scripta_fbn, std::invalid_argument);
     }
 }
 
@@ -533,11 +745,13 @@ void CheckNegateOldRules(int64_t x) {
     const CScriptNum10 bigx(x);
     auto const scriptx = CScriptNum::fromIntUnchecked(x);
     auto const scriptx2 = ScriptBigInt::fromIntUnchecked(x);
+    auto scriptx_fbn = FastBigNum::fromIntUnchecked(x);
 
     // -INT64_MIN is undefined
     if (x != int64_t_min) {
         BOOST_CHECK(verify(-bigx, -scriptx));
         BOOST_CHECK(verify(-bigx, -scriptx2));
+        BOOST_CHECK(verify(-bigx, scriptx_fbn.negate()));
     }
 }
 
@@ -557,7 +771,12 @@ void CheckNegateNewRules(int64_t x) {
 
     auto const scriptx2 = *res2;
     BOOST_CHECK(verify(-bigx, -scriptx2));
+    BOOST_CHECK(verify(-bigx, -scriptx2));
     BOOST_CHECK(verify(-(-bigx), -(-scriptx2)));
+
+    auto scriptx_fbn = FastBigNum::fromIntUnchecked(x);
+    BOOST_CHECK(verify(-bigx, scriptx_fbn.negate()));
+    BOOST_CHECK(verify(-(-bigx), scriptx_fbn.negate()));
 }
 
 static
@@ -568,7 +787,16 @@ void CheckCompare(int64_t a, int64_t b) {
     auto const scriptb = CScriptNum::fromIntUnchecked(b);
     auto const scripta2 = ScriptBigInt::fromIntUnchecked(a);
     auto const scriptb2 = ScriptBigInt::fromIntUnchecked(b);
+    auto const scripta_fbn = FastBigNum::fromIntUnchecked(a);
+    auto const scriptb_fbn = FastBigNum::fromIntUnchecked(b);
 
+    // vs bare int64_t
+    BOOST_CHECK((biga == biga) == (a == a));
+    BOOST_CHECK((biga != biga) == (a != a));
+    BOOST_CHECK((biga < biga) == (a < a));
+    BOOST_CHECK((biga > biga) == (a > a));
+    BOOST_CHECK((biga >= biga) == (a >= a));
+    BOOST_CHECK((biga <= biga) == (a <= a));
     // vs CScriptNum
     BOOST_CHECK((biga == biga) == (scripta == scripta));
     BOOST_CHECK((biga != biga) == (scripta != scripta));
@@ -583,6 +811,13 @@ void CheckCompare(int64_t a, int64_t b) {
     BOOST_CHECK((biga > biga) == (scripta2 > scripta2));
     BOOST_CHECK((biga >= biga) == (scripta2 >= scripta2));
     BOOST_CHECK((biga <= biga) == (scripta2 <= scripta2));
+    // vs FastBigNum
+    BOOST_CHECK((biga == biga) == (scripta_fbn == scripta_fbn));
+    BOOST_CHECK((biga != biga) == (scripta_fbn != scripta_fbn));
+    BOOST_CHECK((biga < biga) == (scripta_fbn < scripta_fbn));
+    BOOST_CHECK((biga > biga) == (scripta_fbn > scripta_fbn));
+    BOOST_CHECK((biga >= biga) == (scripta_fbn >= scripta_fbn));
+    BOOST_CHECK((biga <= biga) == (scripta_fbn <= scripta_fbn));
 
     // vs CScriptNum
     BOOST_CHECK((biga == biga) == (scripta == a));
@@ -598,6 +833,13 @@ void CheckCompare(int64_t a, int64_t b) {
     BOOST_CHECK((biga > biga) == (scripta2 > a));
     BOOST_CHECK((biga >= biga) == (scripta2 >= a));
     BOOST_CHECK((biga <= biga) == (scripta2 <= a));
+    // vs FastBigNum
+    BOOST_CHECK((biga == biga) == (scripta_fbn == a));
+    BOOST_CHECK((biga != biga) == (scripta_fbn != a));
+    BOOST_CHECK((biga < biga) == (scripta_fbn < a));
+    BOOST_CHECK((biga > biga) == (scripta_fbn > a));
+    BOOST_CHECK((biga >= biga) == (scripta_fbn >= a));
+    BOOST_CHECK((biga <= biga) == (scripta_fbn <= a));
 
     // vs CScriptNum
     BOOST_CHECK((biga == bigb) == (scripta == scriptb));
@@ -613,6 +855,13 @@ void CheckCompare(int64_t a, int64_t b) {
     BOOST_CHECK((biga > bigb) == (scripta2 > scriptb2));
     BOOST_CHECK((biga >= bigb) == (scripta2 >= scriptb2));
     BOOST_CHECK((biga <= bigb) == (scripta2 <= scriptb2));
+    // vs FastBigNum
+    BOOST_CHECK((biga == bigb) == (scripta_fbn == scriptb_fbn));
+    BOOST_CHECK((biga != bigb) == (scripta_fbn != scriptb_fbn));
+    BOOST_CHECK((biga < bigb) == (scripta_fbn < scriptb_fbn));
+    BOOST_CHECK((biga > bigb) == (scripta_fbn > scriptb_fbn));
+    BOOST_CHECK((biga >= bigb) == (scripta_fbn >= scriptb_fbn));
+    BOOST_CHECK((biga <= bigb) == (scripta_fbn <= scriptb_fbn));
 
     // vs CScriptNum
     BOOST_CHECK((biga == bigb) == (scripta == b));
@@ -628,6 +877,133 @@ void CheckCompare(int64_t a, int64_t b) {
     BOOST_CHECK((biga > bigb) == (scripta2 > b));
     BOOST_CHECK((biga >= bigb) == (scripta2 >= b));
     BOOST_CHECK((biga <= bigb) == (scripta2 <= b));
+    // vs FastBigNum
+    BOOST_CHECK((biga == bigb) == (scripta_fbn == b));
+    BOOST_CHECK((biga != bigb) == (scripta_fbn != b));
+    BOOST_CHECK((biga < bigb) == (scripta_fbn < b));
+    BOOST_CHECK((biga > bigb) == (scripta_fbn > b));
+    BOOST_CHECK((biga >= bigb) == (scripta_fbn >= b));
+    BOOST_CHECK((biga <= bigb) == (scripta_fbn <= b));
+}
+
+static
+void CheckShift(const int64_t v) {
+    auto res = CScriptNum::fromInt(v);
+    auto res2 = ScriptBigInt::fromInt(v);
+    auto fastBigNum = FastBigNum::fromIntUnchecked(v);
+    BOOST_REQUIRE(res2);
+    BOOST_REQUIRE(res2->getint64().value() == v);
+    BOOST_REQUIRE(fastBigNum.getint64().value() == v);
+    if ( ! res) {
+        BOOST_CHECK(v == int64_t_min);
+    } else {
+        // test CScriptNum shift ops
+        const auto & csn = *res;
+        BOOST_REQUIRE(csn.getint64() == v);
+        const bool neg = v < 0;
+        const uint64_t uv = static_cast<uint64_t>(std::abs(v));
+        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), csn.absValNumBits());
+        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), res2->absValNumBits());
+        BOOST_CHECK_EQUAL(std::max(1, std::bit_width(uv)), fastBigNum.absValNumBits());
+        // for performance, don't run through every bit shift; intentionally attempt shifts in key spots, and past 63
+        constexpr size_t maxBits = ScriptBigInt::MAX_BITS;
+        const unsigned shiftAmts[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 30, 31,
+                                      32, 33, 34, 61, 62, 63, 64, 65, 126, 127, 128, 129, 130, 1000,
+                                      maxBits - 10, maxBits - 1, maxBits, maxBits + 1};
+        for (const unsigned i : shiftAmts) {
+            // left shift
+            auto c = csn; // copy
+            ScriptBigInt sbi = *res2; // copy
+            FastBigNum fbn = fastBigNum; // copy
+            BOOST_REQUIRE(sbi.getint64() == v);
+            const bool okSbi = sbi.checkedLeftShift(i);
+            BOOST_REQUIRE(okSbi || i + sbi.absValNumBits() > ScriptBigInt::MAX_BITS);
+            BOOST_REQUIRE(fbn.getint64() == v);
+            const bool okFbn = fbn.checkedLeftShift(i);
+            BOOST_REQUIRE(okFbn || i + fbn.absValNumBits() > ScriptBigInt::MAX_BITS);
+            BOOST_CHECK(okSbi == okFbn);
+            BOOST_CHECK(!okSbi || !okFbn || sbi.getvch() == fbn.getvch());
+            const bool okC = c.checkedLeftShift(i);
+            BOOST_CHECK(!okC || (okSbi && okFbn)); // if int64 left-shift succeeded, then bigint-based should always succeed
+            if (okC) {
+                BOOST_CHECK(c == 0 || std::bit_width(uv) + i < 64);
+                BOOST_CHECK_EQUAL(c.absValNumBits(), fbn.absValNumBits());
+                const int64_t lshifted = neg ? -(uv << i) : uv << i;
+                BOOST_CHECK(c.getint64() != int64_t_min);
+                // check equality via getint64()
+                BOOST_CHECK(sbi.getint64().value() == c.getint64());
+                BOOST_CHECK(fbn.getint64().value() == c.getint64());
+                BOOST_CHECK(c.getint64() == lshifted);
+                // check operator==
+                BOOST_CHECK(c == lshifted);
+                BOOST_CHECK(sbi == lshifted);
+                BOOST_CHECK(fbn == lshifted);
+                // ensure inverse op returns us back to the same value
+                auto c2 = c;
+                BOOST_REQUIRE(c2 == c /* sanity check */);
+                BOOST_REQUIRE(c2.checkedRightShift(i));
+                BOOST_CHECK(c2.getint64() == v);
+                BOOST_CHECK(c2 == v);
+            } else {
+                BOOST_CHECK(c != 0 && std::bit_width(uv) + i > 63);
+            }
+
+            if (okSbi && okFbn) {
+                BOOST_CHECK_EQUAL(sbi.absValNumBits(), fbn.absValNumBits());
+                // ensure inverse op returns us back to the same value
+                auto sbi2 = sbi;
+                auto fbn2 = fbn;
+                BOOST_REQUIRE(sbi2 == sbi && fbn == fbn2 /* sanity check */);
+                BOOST_REQUIRE(sbi2.checkedRightShift(i));
+                BOOST_CHECK(sbi2 == v);
+                BOOST_CHECK(sbi2.getint64().value() == v);
+                BOOST_REQUIRE(fbn2.checkedRightShift(i));
+                BOOST_CHECK(fbn2 == v);
+                BOOST_CHECK(fbn2.getint64().value() == v);
+                BOOST_CHECK(sbi2.getvch() == fbn2.getvch());
+            }
+
+#if HAVE_INT128
+            if (std::bit_width(uv) + i < 128) {
+                BOOST_CHECK(okSbi && okFbn);
+                const BigInt::int128_t lshifted = static_cast<BigInt::int128_t>(v) << i;
+                BOOST_CHECK(sbi.getBigInt() == lshifted);
+            }
+#endif
+
+            // right shift
+            c = csn; // copy original v
+            sbi = *res2; // copy original v
+            fbn = fastBigNum; // copy of original
+            BOOST_REQUIRE(c.checkedRightShift(i)); // always succeeds
+            BOOST_REQUIRE(sbi.checkedRightShift(i)); // always succeeds
+            BOOST_REQUIRE(fbn.checkedRightShift(i)); // always succeeds
+            BOOST_CHECK(c.getvch() == sbi.getvch());
+            BOOST_CHECK(sbi.getvch() == fbn.getvch());
+            BOOST_CHECK((v < 0) == (c < 0)); // resulting sign of a right-shift must match
+            BOOST_CHECK((v < 0) == (sbi < 0)); // resulting sign of a right-shift must match
+            BOOST_CHECK((v < 0) == (fbn < 0)); // resulting sign of a right-shift must match
+            if (i >= unsigned(std::bit_width(uv))) {
+                // shifting more than number of bits in the number is supported; always yields -1 for neg, 0 for pos
+                BOOST_CHECK_EQUAL(c.getint64(), v < 0 ? -1 : 0);
+                BOOST_CHECK_EQUAL(sbi.getint64().value(), v < 0 ? -1 : 0);
+                BOOST_CHECK_EQUAL(fbn.getint64().value(), v < 0 ? -1 : 0);
+            }
+            if (i < 64) {
+                const int64_t rshifted = v >> i;
+                BOOST_CHECK(c.getint64() == rshifted);
+                BOOST_CHECK(sbi.getint64().value() == rshifted);
+                BOOST_CHECK(fbn.getint64().value() == rshifted);
+            }
+#if HAVE_INT128
+            if (i < 128) {
+                const BigInt::int128_t rshifted = static_cast<BigInt::int128_t>(v) >> i;
+                BOOST_CHECK(sbi.getBigInt().getInt128().value() == rshifted);
+                BOOST_CHECK(sbi.getBigInt() == rshifted);
+            }
+#endif
+        }
+    }
 }
 
 static
@@ -648,6 +1024,8 @@ void RunCreateOldRulesSet(int64_t v, int64_t o) {
     auto const offset = CScriptNum::fromIntUnchecked(o);
     auto const value2 = ScriptBigInt::fromIntUnchecked(v);
     auto const offset2 = ScriptBigInt::fromIntUnchecked(o);
+    auto value3 = FastBigNum::fromIntUnchecked(v);
+    auto const offset3 = FastBigNum::fromIntUnchecked(o);
 
     RunCreateOldRules(value);
 
@@ -659,6 +1037,10 @@ void RunCreateOldRulesSet(int64_t v, int64_t o) {
     auto res2 = value2.safeAdd(offset2);
     BOOST_REQUIRE(res2);
 
+    BOOST_REQUIRE(value3.safeAddInPlace(offset3));
+    BOOST_CHECK(res2->getvch() == value3.getvch());
+    value3 = FastBigNum::fromIntUnchecked(v); // restore
+
     res = value.safeSub(offset);
     if (res) {
         RunCreateOldRules(*res);
@@ -666,6 +1048,9 @@ void RunCreateOldRulesSet(int64_t v, int64_t o) {
 
     res2 = value2.safeSub(offset2);
     BOOST_REQUIRE(res2);
+
+    BOOST_REQUIRE(value3.safeSubInPlace(offset3));
+    BOOST_CHECK(res2->getvch() == value3.getvch());
 }
 
 static
@@ -691,6 +1076,7 @@ void RunCreateNewRulesSet(int64_t v, int64_t o) {
     }
     auto const value = *res;
     auto const value2 = *res2;
+    auto value3 = FastBigNum::fromIntUnchecked(v);
 
     res = CScriptNum::fromInt(o);
     res2 = ScriptBigInt::fromInt(o);
@@ -701,19 +1087,27 @@ void RunCreateNewRulesSet(int64_t v, int64_t o) {
     }
     auto const offset = *res;
     auto const offset2 = *res2;
+    auto const offset3 = FastBigNum::fromIntUnchecked(o);
 
     RunCreateNewRules(value);
 
     res = value.safeAdd(offset);
     res2 = value2.safeAdd(offset2);
+    bool ok3 = value3.safeAddInPlace(offset3);
     BOOST_REQUIRE(res2);
+    BOOST_REQUIRE(ok3);
+    BOOST_CHECK(res2->getvch() == value3.getvch());
+    value3 = FastBigNum::fromIntUnchecked(v); // restore
     if (res) {
         RunCreateNewRules(*res);
     }
 
     res = value.safeSub(offset);
     res2 = value2.safeSub(offset2);
+    ok3 = value3.safeSubInPlace(offset3);
     BOOST_REQUIRE(res2);
+    BOOST_REQUIRE(ok3);
+    BOOST_CHECK(res2->getvch() == value3.getvch());
     if (res) {
         RunCreateNewRules(*res);
     }
@@ -728,9 +1122,12 @@ void RunOperators(int64_t a, int64_t b) {
     CheckMultiply(a, b);
     CheckDivideOldRules(a, b);
     CheckDivideNewRules(a, b);
+    CheckModulo(a, b);
     CheckNegateOldRules(a);
     CheckNegateNewRules(a);
     CheckCompare(a, b);
+    CheckShift(a);
+    if (a != b) CheckShift(b);
 }
 
 BOOST_AUTO_TEST_CASE(creation) {
@@ -746,10 +1143,16 @@ BOOST_AUTO_TEST_CASE(operators) {
     // Prevent potential UB below
     auto negate = [](int64_t x) { return x != int64_t_min ? -x : int64_t_min; };
 
-    for (auto a : values) {
+    std::vector<int64_t> vals(std::begin(values), std::end(values)); // start with the hard-coded values
+    FastRandomContext rng;
+    for (size_t i = 0; i < 10; ++i) { // add 10 random values
+        vals.push_back(static_cast<int64_t>(rng.rand64()));
+    }
+
+    for (auto a : vals) {
         RunOperators(a, a);
         RunOperators(a, negate(a));
-        for (auto b : values) {
+        for (auto b : vals) {
             RunOperators(a, b);
             RunOperators(a, negate(b));
             if (a != int64_t_max && a != int64_t_min && a != int64_t_min_8_bytes &&

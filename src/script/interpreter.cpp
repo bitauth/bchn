@@ -300,7 +300,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                     const BaseSignatureChecker &checker, ScriptExecutionMetrics &metrics, ScriptError *serror) {
     // UsesBigInt template arg must match flags
     assert(UsesBigInt == bool(flags & SCRIPT_ENABLE_MAY2025));
-    using ScriptNumType = std::conditional_t<UsesBigInt, ScriptBigInt, CScriptNum>;
+    using ScriptNumType = std::conditional_t<UsesBigInt, FastBigNum, CScriptNum>;
 
     static auto const bnZero = ScriptNumType::fromIntUnchecked(0);
     static const valtype vchFalse(0);
@@ -1045,27 +1045,25 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
                             switch (opcode) {
                                 case OP_1ADD: {
-                                    auto res = bn.safeAdd(1);
-                                    if ( ! res) {
+                                    const bool ok = bn.safeIncr();
+                                    if ( ! ok) {
                                         return set_error(serror, invalidNumberRangeError);
                                     }
-                                    bn = std::move(*res);
                                     break;
                                 }
                                 case OP_1SUB: {
-                                    auto res = bn.safeSub(1);
-                                    if ( ! res) {
+                                    const bool ok = bn.safeDecr();
+                                    if ( ! ok) {
                                         return set_error(serror, invalidNumberRangeError);
                                     }
-                                    bn = std::move(*res);
                                     break;
                                 }
                                 case OP_NEGATE:
-                                    bn = -bn;
+                                    bn.negate();
                                     break;
                                 case OP_ABS:
                                     if (bn < bnZero) {
-                                        bn = -bn;
+                                        bn.negate();
                                     }
                                     break;
                                 case OP_NOT:
@@ -1112,7 +1110,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                             const valtype &vch1 = stacktop(-2);
                             const valtype &vch2 = stacktop(-1);
-                            ScriptNumType const bn1(vch1, fRequireMinimal, maxIntegerSize);
+                            ScriptNumType bn1(vch1, fRequireMinimal, maxIntegerSize);
                             ScriptNumType const bn2(vch2, fRequireMinimal, maxIntegerSize);
                             auto bn = ScriptNumType::fromIntUnchecked(0);
                             uint32_t quadraticOpCost = 0u; // for OP_MUL, OP_DIV, and OP_MOD
@@ -1123,31 +1121,31 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
                             switch (opcode) {
                                 case OP_ADD: {
-                                    auto res = bn1.safeAdd(bn2);
-                                    if ( ! res) {
+                                    const bool ok = bn1.safeAddInPlace(bn2);
+                                    if ( ! ok) {
                                         return set_error(serror, invalidNumberRangeError);
                                     }
-                                    bn = std::move(*res);
+                                    bn = std::move(bn1);
                                     pushCostFactor = 2u;
                                     break;
                                 }
 
                                 case OP_SUB: {
-                                    auto res = bn1.safeSub(bn2);
-                                    if ( ! res) {
+                                    const bool ok = bn1.safeSubInPlace(bn2);
+                                    if ( ! ok) {
                                         return set_error(serror, invalidNumberRangeError);
                                     }
-                                    bn = std::move(*res);
+                                    bn = std::move(bn1);
                                     pushCostFactor = 2u;
                                     break;
                                 }
 
                                 case OP_MUL: {
-                                    auto res = bn1.safeMul(bn2);
-                                    if ( ! res) {
+                                    const bool ok = bn1.safeMulInPlace(bn2);
+                                    if ( ! ok) {
                                         return set_error(serror, invalidNumberRangeError);
                                     }
-                                    bn = std::move(*res);
+                                    bn = std::move(bn1);
                                     quadraticOpCost = vch1.size() * vch2.size();
                                     pushCostFactor = 2u;
                                     break;
@@ -1155,20 +1153,20 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
                                 case OP_DIV:
                                     // denominator must not be 0
-                                    if (bn2 == 0) {
+                                    if (bn2 == bnZero) {
                                         return set_error(serror, ScriptError::DIV_BY_ZERO);
                                     }
-                                    bn = bn1 / bn2;
+                                    bn = std::move(bn1 /= bn2);
                                     quadraticOpCost = vch1.size() * vch2.size();
                                     pushCostFactor = 2u;
                                     break;
 
                                 case OP_MOD:
                                     // divisor must not be 0
-                                    if (bn2 == 0) {
+                                    if (bn2 == bnZero) {
                                         return set_error(serror, ScriptError::MOD_BY_ZERO);
                                     }
-                                    bn = bn1 % bn2;
+                                    bn = std::move(bn1 %= bn2);
                                     quadraticOpCost = vch1.size() * vch2.size();
                                     pushCostFactor = 2u;
                                     break;
@@ -1253,17 +1251,10 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 // This branch is never taken outside of tests.
                                 return set_error(serror, ScriptError::UNKNOWN);
                             } else {
-                                constexpr uint64_t maxScriptNumBits = 8u * std::max(CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT,
-                                                                                    ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT);
-                                static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > maxScriptNumBits,
+                                static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > ScriptBigInt::MAX_BITS,
                                               "Assumption is a 32-bit int can hold more than the bit size of a script number");
-                                static_assert(std::is_same_v<ScriptNumType, ScriptBigInt>, "Defensive programming redundant check");
                                 // Note: This call clamps i32bits to the range: [INT_MIN, INT_MAX].
-                                int32_t const i32bits = stacktop(-1).size() <= maxIntegerSizeLegacy
-                                                          // Use allocation-less non-BigInt if the nbits argument is small
-                                                        ? CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32()
-                                                          // Resort to BigInt-based script nums for larger arguments
-                                                        : ScriptBigInt(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
+                                int32_t const i32bits = ScriptNumType(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
 
                                 // Disallow negative bit counts
                                 if (i32bits < 0) {
@@ -1280,43 +1271,16 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                     ScriptBigInt::throwIfInvalidScriptNumEncoding(stacktop(-1), fRequireMinimal, maxIntegerSize);
                                 } else {
                                     // nbits > 0, we must do actual work
-                                    ScriptBigInt num(stacktop(-1), fRequireMinimal, maxIntegerSize);
+                                    ScriptNumType num(stacktop(-1), fRequireMinimal, maxIntegerSize);
                                     popstack(stack); // consume numeric argument
 
                                     bool valid{};
-                                    if (num == 0) {
-                                        // Number was zero: No work needs to be done, since all possible shifts yield 0.
-                                        valid = true;
+                                    if (opcode == OP_LSHIFTNUM) {
+                                        // Arithmetic left shift, r = a * 2^b
+                                        valid = num.checkedLeftShift(nbits); // Note: this fast-fails on excessive nbits
                                     } else {
-                                        // Non-zero number: Maybe do work.
-                                        uint64_t const inputNumBits = num.getBigInt().absValNumBits();
-                                        if (opcode == OP_LSHIFTNUM) {
-                                            /* Left shift */
-                                            if (nbits + inputNumBits > maxScriptNumBits) {
-                                                // To avoid needless CPU churn, refuse to left-shift a non-zero value if it
-                                                // would yield a result that would exceed 80k bits, since that would always
-                                                // yield a consensus-invalid number.
-                                                valid = false;
-                                            } else {
-                                                // Arithmetic left shift, r = a * 2^b
-                                                valid = num.checkedLeftShift(nbits);
-                                            }
-                                        } else {
-                                            /* Right shift */
-                                            if (nbits >= inputNumBits) {
-                                                // Fast-path optimization -- right-shifting >= the number of bits in the
-                                                // actual number always yields -1 for negative numbers and 0 otherwise.
-                                                if (num < 0) {
-                                                    num = ScriptBigInt::fromIntUnchecked(-1);
-                                                } else {
-                                                    num = ScriptBigInt::fromIntUnchecked(0);
-                                                }
-                                                valid = true;
-                                            } else {
-                                                // Arithmetic right shift, r = a / 2^b (rounded towards negative infinity)
-                                                valid = num.checkedRightShift(nbits);
-                                            }
-                                        }
+                                        // Arithmetic right shift, r = a / 2^b (rounded towards negative infinity)
+                                        valid = num.checkedRightShift(nbits); // Note: this fast-returns on excessive nbits
                                     }
 
                                     if (!valid) {
@@ -1860,11 +1824,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             // So, in order to handle this, and as an optimization, we just saturate `nbits` to INT_MAX here
                             // even if the number of bits requested is > 2^31 - 1. Since the input data can never exceed 80k
                             // bits (let alone INT_MAX bits), this is ok and produces consensus-correct behavior.
-                            int32_t const nbits = stacktop(-1).size() <= maxIntegerSizeLegacy
-                                                    // Use allocation-less non-BigInt if the nbits argument is small
-                                                  ? CScriptNum(stacktop(-1), fRequireMinimal, maxIntegerSizeLegacy).getint32()
-                                                    // Resort to (possibly) BigInt-based script nums for larger arguments
-                                                  : ScriptNumType(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
+                            int32_t const nbits = ScriptNumType(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
 
                             // Negative bit counts are not allowed
                             if (nbits < 0) {
