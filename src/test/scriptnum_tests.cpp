@@ -1149,26 +1149,29 @@ BOOST_AUTO_TEST_CASE(operators) {
         vals.push_back(static_cast<int64_t>(rng.rand64()));
     }
 
-    for (auto a : vals) {
+    for (const auto a : vals) {
         RunOperators(a, a);
         RunOperators(a, negate(a));
-        for (auto b : vals) {
+        for (const auto b : vals) {
             RunOperators(a, b);
             RunOperators(a, negate(b));
+            int64_t tmp;
+            const bool ovradd = __builtin_add_overflow(a, b, &tmp); // we need to do these checks to prevent UB
+            const bool ovrsub = __builtin_sub_overflow(a, b, &tmp);
             if (a != int64_t_max && a != int64_t_min && a != int64_t_min_8_bytes &&
                 b != int64_t_max && b != int64_t_min && b != int64_t_min_8_bytes) {
-                RunOperators(a + b, a);
-                RunOperators(a + b, b);
-                RunOperators(a - b, a);
-                RunOperators(a - b, b);
-                RunOperators(a + b, a + b);
-                RunOperators(a + b, a - b);
-                RunOperators(a - b, a + b);
-                RunOperators(a - b, a - b);
-                RunOperators(a + b, negate(a));
-                RunOperators(a + b, negate(b));
-                RunOperators(a - b, negate(a));
-                RunOperators(a - b, negate(b));
+                if (!ovradd) RunOperators(a + b, a);
+                if (!ovradd) RunOperators(a + b, b);
+                if (!ovrsub) RunOperators(a - b, a);
+                if (!ovrsub) RunOperators(a - b, b);
+                if (!ovradd) RunOperators(a + b, a + b);
+                if (!ovradd && !ovrsub) RunOperators(a + b, a - b);
+                if (!ovradd && !ovrsub) RunOperators(a - b, a + b);
+                if (!ovrsub) RunOperators(a - b, a - b);
+                if (!ovradd) RunOperators(a + b, negate(a));
+                if (!ovradd) RunOperators(a + b, negate(b));
+                if (!ovrsub) RunOperators(a - b, negate(a));
+                if (!ovrsub) RunOperators(a - b, negate(b));
             }
         }
     }
