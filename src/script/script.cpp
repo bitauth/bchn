@@ -8,8 +8,8 @@
 
 #include <script/script_flags.h>
 #include <tinyformat.h>
-#include <util/strencodings.h>
 #include <util/overloaded.h>
+#include <util/strencodings.h>
 
 const char *GetOpName(opcodetype opcode) {
     switch (opcode) {

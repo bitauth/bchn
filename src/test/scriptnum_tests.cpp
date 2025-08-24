@@ -15,11 +15,13 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <bit>
-#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <limits>
+#include <type_traits>
 
 BOOST_FIXTURE_TEST_SUITE(scriptnum_tests, BasicTestingSetup)
 
