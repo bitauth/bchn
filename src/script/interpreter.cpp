@@ -15,13 +15,13 @@
 #include <script/script.h>
 #include <script/script_flags.h>
 #include <script/sigencoding.h>
-#include <span.h>
 #include <tinyformat.h>
 #include <uint256.h>
 #include <util/bitmanip.h>
 
 #include <list>
 #include <map>
+#include <span>
 
 bool CastToBool(const valtype &vch) {
     for (size_t i = 0; i < vch.size(); i++) {
@@ -175,15 +175,16 @@ public:
  */
 struct EvalFrame {
     const size_t cumulativeCtr = 0; ///< Cumulative vfExec.size() + loopDepthCtr for all control frames BELOW this one
-    using ScriptView = Span<const uint8_t>;
+    using ScriptView = std::span<const uint8_t>;
     const ScriptView script;        ///< The script we are evaluating (as a view type)
     ConditionStack vfExec;          ///< The O(1) conditional stack for this control frame
-    const uint8_t *pc;              ///< Initially equal to script.begin(), but incremented as we execute the script
+    const uint8_t *pc;              ///< Initially equal to script.data(), but incremented as we execute the script
     const uint8_t *pbegincodehash;  ///< Initially equal to `pc`, but updated if we encounter OP_CODESEPARATOR opcodes
 
     /**
      *  Control-flow stack. nullptr entries indicate most-recent control block we are inside of is an OP_IF;
-     *  non-nullptr indicates we are inside a loop (OP_BEGIN) and the value is a `pc` to jump to for looping.
+     *  non-nullptr indicates we are inside a loop (OP_BEGIN) and the value is a `pc` to jump to for looping (points
+     *  into `script` above).
      */
     std::vector<const uint8_t *> controlStack;
     /**
@@ -193,7 +194,7 @@ struct EvalFrame {
     size_t loopDepthCtr = 0;
 
     EvalFrame(size_t cumCtr, const ScriptView &scriptView)
-        : cumulativeCtr(cumCtr), script{scriptView}, pc{script.begin()}, pbegincodehash{pc} {}
+        : cumulativeCtr(cumCtr), script{scriptView}, pc{script.data()}, pbegincodehash{pc} {}
 
     /// Returns non-nullptr if the innermost control flow structure is a loop (OP_BEGIN), nullptr otherwise.
     [[nodiscard]] const uint8_t *controlStackTop() const {
@@ -263,7 +264,7 @@ class EvalStack {
 public:
     explicit EvalStack(const CScript *outermostScript) {
         assert(outermostScript != nullptr);
-        pushFrame(*outermostScript);
+        pushFrame({outermostScript->data(), outermostScript->size()});
     }
 
     void pushFrame(const EvalFrame::ScriptView &script) {
@@ -358,7 +359,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
             EvalFrame &curFrame = evalStack.top();
             const uint8_t *&pc = curFrame.pc;
             const uint8_t *&pbegincodehash = curFrame.pbegincodehash;
-            const uint8_t *const pend = curFrame.script.end();
+            const uint8_t *const pend = curFrame.script.data() + curFrame.script.size();
             bool newEvalFrameWasPushed = false;
 
             while (pc < pend && !newEvalFrameWasPushed) {
