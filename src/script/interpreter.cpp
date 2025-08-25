@@ -19,9 +19,11 @@
 #include <uint256.h>
 #include <util/bitmanip.h>
 
+#include <limits>
 #include <list>
 #include <map>
 #include <span>
+#include <utility>
 
 bool CastToBool(const valtype &vch) {
     for (size_t i = 0; i < vch.size(); i++) {
@@ -313,7 +315,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
 
     // Function table (OP_DEFINE/OP_INVOKE support)
     using FunctionTable = std::map<uint16_t, const valtype>;
-    static_assert(may2026::MAX_FUNCTION_IDENTIFIER <= static_cast<uint64_t>(std::numeric_limits<FunctionTable::key_type>::max()),
+    static_assert(std::in_range<FunctionTable::key_type>(may2026::MAX_FUNCTION_IDENTIFIER),
                   "FunctionTable::key_type must be large enough to support the max function identifier");
     FunctionTable functionTable;
 
@@ -1117,7 +1119,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             uint32_t quadraticOpCost = 0u; // for OP_MUL, OP_DIV, and OP_MOD
                             uint32_t pushCostFactor = 1u; // arithmetic and min/max ops below set this to 2x
                             constexpr uint64_t worstCaseSize = std::max(MAX_SCRIPT_ELEMENT_SIZE_LEGACY, may2025::MAX_SCRIPT_ELEMENT_SIZE);
-                            static_assert(worstCaseSize * worstCaseSize <= std::numeric_limits<uint32_t>::max(),
+                            static_assert(std::in_range<uint32_t>(worstCaseSize * worstCaseSize),
                                           "Assumption is that the largest theoretical op cost fits in a 32-bit unsigned int.");
 
                             switch (opcode) {
@@ -1252,7 +1254,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 // This branch is never taken outside of tests.
                                 return set_error(serror, ScriptError::UNKNOWN);
                             } else {
-                                static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > ScriptBigInt::MAX_BITS,
+                                static_assert(std::in_range<int32_t>(ScriptBigInt::MAX_BITS),
                                               "Assumption is a 32-bit int can hold more than the bit size of a script number");
                                 // Note: This call clamps i32bits to the range: [INT_MIN, INT_MAX].
                                 int32_t const i32bits = ScriptNumType(stacktop(-1), fRequireMinimal, maxIntegerSize).getint32();
@@ -1815,8 +1817,8 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                             constexpr uint64_t maxDataPushBits = 8u * std::max(MAX_SCRIPT_ELEMENT_SIZE_LEGACY,
                                                                                may2025::MAX_SCRIPT_ELEMENT_SIZE);
-                            static_assert(static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) > maxDataPushBits,
-                                          "Assumption is a 32-bit int can hold more than the bit size of a data push");
+                            static_assert(std::in_range<int32_t>(maxDataPushBits),
+                                          "Assumption is a 32-bit int can hold the bit size of a data push");
 
                             // Note: The below call to `getint32()` is a saturating call that clamps to [INT_MIN, INT_MAX].
                             //
@@ -2771,12 +2773,10 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey, uint32_
         // The latter can be readily done with 1-of-3 bare multisignatures,
         // however the former is not practically doable with standard scripts,
         // so the practical density limit is 1/36.66.
-        static_assert(INT_MAX > MAX_SCRIPT_SIZE,
-                      "overflow sanity check on max script size");
-        static_assert(INT_MAX / 43 / 3 > MAX_OPS_PER_SCRIPT_LEGACY,
-                      "overflow sanity check on maximum possible sigchecks "
-                      "from sig+redeem+pub scripts");
-        if (int(scriptSig.size()) < metrics.GetSigChecks() * 43 - 60) {
+        static_assert(std::in_range<int>(MAX_SCRIPT_SIZE), "overflow sanity check on max script size");
+        static_assert(std::numeric_limits<int>::max() / 43 / 3 > MAX_OPS_PER_SCRIPT_LEGACY,
+                      "overflow sanity check on maximum possible sigchecks from sig+redeem+pub scripts");
+        if (static_cast<int>(scriptSig.size()) < metrics.GetSigChecks() * 43 - 60) {
             return set_error(serror, ScriptError::INPUT_SIGCHECKS);
         }
     }
