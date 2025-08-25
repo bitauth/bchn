@@ -1005,6 +1005,9 @@ public:
         }
     }
 
+    // Returns true if we are using native ints (CScriptNum as the backing class), false if using BigInt (ScriptBigInt)
+    bool usesNative() const { return std::holds_alternative<CScriptNum>(var); }
+
     int32_t getint32() const { return std::visit([](const auto &num){ return num.getint32(); }, var); }
 
     std::optional<int64_t> getint64() const {

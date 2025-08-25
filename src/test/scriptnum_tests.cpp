@@ -1183,6 +1183,21 @@ BOOST_AUTO_TEST_CASE(operators) {
 static
 void CheckMinimalyEncode(std::vector<uint8_t> data, const std::vector<uint8_t> &expected) {
     bool alreadyEncoded = CScriptNum::IsMinimallyEncoded(data, data.size());
+    if (!alreadyEncoded) {
+        // While we are here, ensure that non-minimally-encoded numbers throw
+        if (data.size() <= CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT) {
+            BOOST_CHECK_THROW(CScriptNum(data, true, CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT), scriptnum_error);
+        }
+        BOOST_CHECK_THROW(ScriptBigInt(data, true, ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT), scriptnum_error);
+        BOOST_CHECK_THROW(FastBigNum(data, true, ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT), scriptnum_error);
+    } else {
+        // And minimally encoded numbers should not throw
+        if (data.size() <= CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT) {
+            BOOST_CHECK_NO_THROW(CScriptNum(data, true, CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT));
+        }
+        BOOST_CHECK_NO_THROW(ScriptBigInt(data, true, ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT));
+        BOOST_CHECK_NO_THROW(FastBigNum(data, true, ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT));
+    }
     bool hasEncoded = CScriptNum::MinimallyEncode(data);
     BOOST_CHECK_EQUAL(hasEncoded, !alreadyEncoded);
     BOOST_CHECK(data == expected);
@@ -1229,6 +1244,100 @@ BOOST_AUTO_TEST_CASE(minimize_encoding_test) {
             negkpadded.push_back(0x80);
         }
     }
+}
+
+// Test that FastBigNum uses the correct "backing" for the integer it's given (either native or BigInt-backed)
+BOOST_AUTO_TEST_CASE(check_fast_big_num_uses_correct_backing) {
+    constexpr size_t maxIntSize = ScriptBigInt::MAXIMUM_ELEMENT_SIZE_BIG_INT;
+
+    // Test that FastBigNum uses native ints if the size is <= 8, BigInt otherwise
+    for (size_t i = 0; i < maxIntSize; ++i) {
+        std::vector<uint8_t> data(i, static_cast<uint8_t>(0x42u)); // i-sized data blob, consisting of `0x42` bytes
+        ScriptNumEncoding::MinimallyEncode(data); // ensure minimally encoded
+
+        FastBigNum fbn(data, true, maxIntSize);
+        // If the blob is <= 8 bytes, it should be using native
+        BOOST_CHECK_EQUAL(fbn.usesNative(), data.size() <= CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT);
+    }
+
+    // Check native ints should all be .usesNative() except for int64_t_min which exceeds 8 bytes serialized size and
+    // cannot "use native"
+    size_t nativeCt = 0, nonnativeCt = 0, int64MaxCt = 0, int64MinCt = 0, notZeroCt = 0;
+    for (const auto val : values) {
+        int64MinCt += val == int64_t_min;
+
+        auto fbn = FastBigNum::fromIntUnchecked(val);
+
+        BOOST_CHECK(fbn.usesNative() || val == int64_t_min);
+        BOOST_CHECK(fbn >= int64_t_min && fbn <= int64_t_max);
+
+        if (fbn.usesNative()) {
+            ++nativeCt;
+            BOOST_CHECK(fbn.getvch().size() <= CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT);
+            if (fbn != 0) {
+                ++notZeroCt;
+
+                // See about breaking us out of native by doing arithmetic with an out-of-range value
+                FastBigNum copy = fbn;
+                // Add using another native FastBigNum
+                FastBigNum other = copy < 0 ? FastBigNum::fromIntUnchecked(int64_t_min + 1)
+                                            : FastBigNum::fromIntUnchecked(int64_t_max);
+                BOOST_CHECK(other.usesNative());
+                auto ok = copy.safeAddInPlace(other);
+                BOOST_CHECK(ok);
+                BOOST_CHECK(!copy.usesNative());
+
+                // Add us to a non-native FastBigNum
+                copy = fbn;
+                other = FastBigNum(18446744073709551616_bi .serialize(), true, maxIntSize);
+                BOOST_CHECK(!other.usesNative());
+                ok = copy.safeAddInPlace(other);
+                BOOST_CHECK(ok);
+                BOOST_CHECK(!copy.usesNative());
+
+                // Mul us to a non-native FastBigNum
+                copy = fbn;
+                other = FastBigNum(9223372036854775809_bi .serialize(), true, maxIntSize);
+                BOOST_CHECK(!other.usesNative());
+                ok = copy.safeMulInPlace(other);
+                BOOST_CHECK(ok);
+                BOOST_CHECK(!copy.usesNative());
+
+                // Div us with a non-native FastBigNum
+                copy = fbn;
+                other = FastBigNum(9223372036854775809_bi .serialize(), true, maxIntSize);
+                BOOST_CHECK(!other.usesNative());
+                copy /= other;
+                BOOST_CHECK(!copy.usesNative());
+                BOOST_CHECK(copy == 0); // we should be 0, even if we are using BigInt
+            }
+        } else {
+            ++nonnativeCt;
+            BOOST_CHECK(fbn.getvch().size() == CScriptNum::MAXIMUM_ELEMENT_SIZE_64_BIT + 1u);
+        }
+
+        if (val == int64_t_max) {
+            ++int64MaxCt;
+
+            // Adding 1 to the max value breaks us out of native
+            BOOST_CHECK(fbn.usesNative());
+            BOOST_CHECK(fbn.safeIncr());
+            BOOST_CHECK(!fbn.usesNative());
+
+            // Subtracting 1 back won't restore us to native. BigInt mode is "sticky"
+            BOOST_CHECK(fbn.safeDecr());
+            BOOST_CHECK(fbn == int64_t_max);
+            BOOST_CHECK(!fbn.usesNative());
+        }
+
+    }
+
+    // Check that all paths above were taken and tested
+    BOOST_CHECK(nativeCt > 0u);
+    BOOST_CHECK(nonnativeCt > 0u);
+    BOOST_CHECK(int64MaxCt > 0u);
+    BOOST_CHECK(int64MinCt > 0u);
+    BOOST_CHECK(notZeroCt > 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
