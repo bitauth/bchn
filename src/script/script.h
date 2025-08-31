@@ -340,18 +340,13 @@ public:
         return Derived(std::move(x));
     }
 
-    bool operator==(IntType const& x) const noexcept { return value_ == x; }
-    bool operator!=(IntType const& x) const noexcept { return value_ != x; }
-    bool operator<=(IntType const& x) const noexcept { return value_ <= x; }
-    bool operator< (IntType const& x) const noexcept { return value_ < x; }
-    bool operator>=(IntType const& x) const noexcept { return value_ >= x; }
-    bool operator> (IntType const& x) const noexcept { return value_ > x; }
-    bool operator==(Derived const& x) const noexcept { return operator==(x.value_); }
-    bool operator!=(Derived const& x) const noexcept { return operator!=(x.value_); }
-    bool operator<=(Derived const& x) const noexcept { return operator<=(x.value_); }
-    bool operator< (Derived const& x) const noexcept { return operator<(x.value_); }
-    bool operator>=(Derived const& x) const noexcept { return operator>=(x.value_); }
-    bool operator> (Derived const& x) const noexcept { return operator>(x.value_); }
+    // Comparison ops; Note: Must declare opeator<=> and operator== in this way so as to avoid ambiguous resolution for
+    // derived classes.
+    friend std::strong_ordering operator<=>(Derived const &a, IntType const& x) noexcept { return a.value_ <=> x; }
+    friend bool operator==(Derived const &a, IntType const& x) noexcept { return operator<=>(a, x) == 0; }
+
+    friend std::strong_ordering operator<=>(Derived const &a, Derived const& b) noexcept { return operator<=>(a, b.value_); }
+    friend bool operator==(Derived const& a, Derived const& b) noexcept { return operator<=>(a, b.value_) == 0; }
 
     // Arithmetic operations
     std::optional<Derived> safeAdd(IntType const& x) const noexcept(!UsesBigInt) {
@@ -1055,18 +1050,8 @@ public:
     }
 
     bool operator==(const FastBigNum &o) const { return (*this <=> o) == 0; }
-    bool operator!=(const FastBigNum &o) const { return (*this <=> o) != 0; }
-    bool operator<=(const FastBigNum &o) const { return (*this <=> o) <= 0; }
-    bool operator< (const FastBigNum &o) const { return (*this <=> o) <  0; }
-    bool operator> (const FastBigNum &o) const { return (*this <=> o) >  0; }
-    bool operator>=(const FastBigNum &o) const { return (*this <=> o) >= 0; }
 
     bool operator==(const int64_t o) const { return (*this <=> o) == 0; }
-    bool operator!=(const int64_t o) const { return (*this <=> o) != 0; }
-    bool operator<=(const int64_t o) const { return (*this <=> o) <= 0; }
-    bool operator< (const int64_t o) const { return (*this <=> o) <  0; }
-    bool operator> (const int64_t o) const { return (*this <=> o) >  0; }
-    bool operator>=(const int64_t o) const { return (*this <=> o) >= 0; }
 };
 
 /**
