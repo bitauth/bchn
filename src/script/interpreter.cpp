@@ -314,9 +314,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
     }
 
     // Function table (OP_DEFINE/OP_INVOKE support)
-    using FunctionTable = std::map<uint16_t, const valtype>;
-    static_assert(std::in_range<FunctionTable::key_type>(may2026::MAX_FUNCTION_IDENTIFIER),
-                  "FunctionTable::key_type must be large enough to support the max function identifier");
+    using FunctionTable = std::map<valtype, const valtype>;
     FunctionTable functionTable;
 
     std::vector<valtype> altstack;
@@ -550,8 +548,8 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
                             }
 
-                            const int64_t funcId = CScriptNum(stacktop(-1), true, maxIntegerSizeLegacy).getint64();
-                            if (funcId < 0 || funcId > static_cast<int64_t>(may2026::MAX_FUNCTION_IDENTIFIER)) {
+                            auto &funcId = stacktop(-1);
+                            if (funcId.size() > may2026::MAX_FUNCTION_IDENTIFIER_SIZE) {
                                 return set_error(serror, ScriptError::INVALID_FUNCTION_IDENTIFIER);
                             }
 
@@ -562,8 +560,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
 
                             const auto & [it, inserted] =
-                                functionTable.try_emplace(static_cast<FunctionTable::key_type>(funcId),
-                                                          std::move(funcCode));
+                                functionTable.try_emplace(std::move(funcId), std::move(funcCode));
 
                             if ( ! inserted) {
                                 // overwriting existing functions is disallowed
@@ -587,12 +584,12 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                                 return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
                             }
 
-                            const int64_t funcId = CScriptNum(stacktop(-1), true, maxIntegerSizeLegacy).getint64();
-                            if (funcId < 0 || funcId > static_cast<int64_t>(may2026::MAX_FUNCTION_IDENTIFIER)) {
+                            const auto &funcId = stacktop(-1);
+                            if (funcId.size() > may2026::MAX_FUNCTION_IDENTIFIER_SIZE) {
                                 return set_error(serror, ScriptError::INVALID_FUNCTION_IDENTIFIER);
                             }
 
-                            const auto it = functionTable.find(static_cast<FunctionTable::key_type>(funcId));
+                            const auto it = functionTable.find(funcId);
                             if (it == functionTable.end()) {
                                 return set_error(serror, ScriptError::INVOKED_UNDEFINED_FUNCTION);
                             }

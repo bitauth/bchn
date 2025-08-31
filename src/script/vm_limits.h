@@ -104,6 +104,6 @@ public:
 namespace may2026 {
 // Control stack depth limit (max cumulative depth of OP_IF, OP_EVAL, OP_BEGIN and friends)
 static constexpr unsigned int MAX_CONTROL_STACK_DEPTH = may2025::MAX_CONDITIONAL_STACK_DEPTH;
-// Max function identifier: 999
-static constexpr unsigned int MAX_FUNCTION_IDENTIFIER = MAX_STACK_SIZE - 1;
+// Max byte length for a function identifier
+static constexpr unsigned int MAX_FUNCTION_IDENTIFIER_SIZE = 7u;
 } // namespace may2026
