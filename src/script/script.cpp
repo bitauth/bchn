@@ -661,10 +661,7 @@ std::strong_ordering FastBigNum::operator<=>(const FastBigNum &o) const {
             },
             [&o](const ScriptBigInt &sbi) {
                 const ScriptBigInt &osbi = std::get<ScriptBigInt>(o.var);
-                const int cmp = sbi.getBigInt().compare(osbi.getBigInt());
-                if (cmp < 0) return std::strong_ordering::less;
-                else if (cmp > 0) return std::strong_ordering::greater;
-                return std::strong_ordering::equal;
+                return sbi.getBigInt().compare(osbi.getBigInt()) <=> 0;
             }
         }, var);
     } else {
@@ -673,19 +670,13 @@ std::strong_ordering FastBigNum::operator<=>(const FastBigNum &o) const {
             [&o](const CScriptNum &csn) {
                 // We are CScriptNum, `o` is ScriptBigInt
                 const ScriptBigInt &osbi = std::get<ScriptBigInt>(o.var);
-                const int cmp = osbi.getBigInt().compare(csn.getint64());
                 // Note: we reversed the comparison
-                if (cmp < 0) return std::strong_ordering::greater;
-                else if (cmp > 0) return std::strong_ordering::less;
-                return std::strong_ordering::equal;
+                return 0 <=> osbi.getBigInt().compare(csn.getint64());
             },
             [&o](const ScriptBigInt &sbi) {
                 // We are ScriptBigInt, `o` is CScriptNum
                 const CScriptNum &ocsn = std::get<CScriptNum>(o.var);
-                const int cmp = sbi.getBigInt().compare(ocsn.getint64());
-                if (cmp < 0) return std::strong_ordering::less;
-                else if (cmp > 0) return std::strong_ordering::greater;
-                return std::strong_ordering::equal;
+                return sbi.getBigInt().compare(ocsn.getint64()) <=> 0;
             }
         }, var);
     }

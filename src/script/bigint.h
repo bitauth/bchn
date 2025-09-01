@@ -273,11 +273,7 @@ public:
     BigInt  operator--(int) { BigInt ret(*this); --*this; return ret; }
 
 #define DECLARE_CMP_OPS(T) \
-    std::strong_ordering operator<=>(T o) const { \
-        if (const int cmp = compare(o); cmp < 0) return std::strong_ordering::less; \
-        else if (cmp > 0) return std::strong_ordering::greater; \
-        else return std::strong_ordering::equal; \
-    } \
+    std::strong_ordering operator<=>(T o) const { return compare(o) <=> 0; } \
     bool operator==(T o) const { return 0 == operator<=>(o); }
 
     // BigInt comparison
