@@ -105,7 +105,7 @@ struct Upgrade12OverrideTestingSetup : Upgrade11OverrideTestingSetup {
     }
 };
 
-bool ran2022 = false, ran2023 = false, ran2025 = false;
+bool ran2022 = false, ran2023 = false, ran2025 = false, ran2026 = false;
 
 } // namespace
 
@@ -134,10 +134,17 @@ BOOST_FIXTURE_TEST_CASE(upgrade11_2025, Upgrade12OverrideTestingSetup) {
     ran2025 = true;
 }
 
+BOOST_FIXTURE_TEST_CASE(upgrade12_2026, Upgrade12OverrideTestingSetup) {
+    SetUpgrade11Active(true); // ensure Upgrade11 (vmlimts + bigint) is active
+    SetUpgrade12Active(true); // ensure Upgrade12 (may2026) is active
+    RunTestPack("2026");
+    ran2026 = true;
+}
+
 // Precondition: This test *requires* that all Libauth test packs have previously completed as part of this
 // test_bitcoin run.
 BOOST_FIXTURE_TEST_CASE(test_lookup_table, TestingSetup) {
-    BOOST_REQUIRE(ran2022 && ran2023 && ran2025);
+    BOOST_REQUIRE(ran2022 && ran2023 && ran2025 && ran2026);
     LibauthTestingSetup::ProcessExpectedReasonsTable();
     LibauthTestingSetup::ProcessExpectedMetricsTable();
 }
