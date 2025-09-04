@@ -46,6 +46,10 @@ const std::vector<PackDesc> packsToRun{{
               /* .nonStd = */ SCRIPT_ENABLE_MAY2025,
               /* .excludeStd = */ 0,
               /* .excludeNonStd = */ SCRIPT_VM_LIMITS_STANDARD}},
+    {"2026", {/* .std = */    SCRIPT_ENABLE_MAY2025 | SCRIPT_ENABLE_MAY2026 | SCRIPT_VM_LIMITS_STANDARD,
+              /* .nonStd = */ SCRIPT_ENABLE_MAY2025 | SCRIPT_ENABLE_MAY2026,
+              /* .excludeStd = */ 0,
+              /* .excludeNonStd = */ SCRIPT_VM_LIMITS_STANDARD}},
 }};
 
 // Calibrated to behave "as if" we process a 50KB block full of txns identical to this particular txn.
