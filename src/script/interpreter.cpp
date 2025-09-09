@@ -661,7 +661,7 @@ bool EvalScriptImpl(std::vector<valtype> &stack, const CScript &initialScript, u
                             }
                             if ( ! fValue) {
                                 // This branch is only taken if fExec is true and if the test condition was false.
-                                // Update program counter to point to the instruciton after the enclosing OP_BEGIN.
+                                // Update program counter to point to the instruction after the enclosing OP_BEGIN.
                                 pc = curFrame.controlStackTop();
                             } else {
                                 // Condition met or !fExec, pop the loop stack item previously pushed by OP_BEGIN.
