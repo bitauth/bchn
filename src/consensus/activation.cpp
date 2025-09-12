@@ -107,7 +107,7 @@ int32_t GetUpgrade9ActivationHeight(const Consensus::Params &params) {
 }
 
 bool IsUpgrade9EnabledForHeightPrev(const Consensus::Params &params, const int32_t nHeightPrev) {
-    return nHeightPrev >= GetUpgrade9ActivationHeight(params);
+    return nHeightPrev >= g_Upgrade9HeightOverride.value_or(params.upgrade9Height);
 }
 
 bool IsUpgrade9Enabled(const Consensus::Params &params, const CBlockIndex *pindexPrev) {
@@ -125,16 +125,13 @@ int32_t GetUpgrade10ActivationHeight(const Consensus::Params &params) {
     return g_Upgrade10HeightOverride.value_or(params.upgrade10Height);
 }
 
-static bool IsUpgrade10EnabledForHeightPrev(const Consensus::Params &params, const int32_t nHeightPrev) {
-    return nHeightPrev >= GetUpgrade10ActivationHeight(params);
-}
 
 bool IsUpgrade10Enabled(const Consensus::Params &params, const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
         return false;
     }
 
-    return IsUpgrade10EnabledForHeightPrev(params, pindexPrev->nHeight);
+    return pindexPrev->nHeight >= g_Upgrade10HeightOverride.value_or(params.upgrade10Height);
 }
 
 // Upgrade 11
@@ -145,7 +142,7 @@ int32_t GetUpgrade11ActivationHeight(const Consensus::Params &params) {
 }
 
 static bool IsUpgrade11EnabledForHeightPrev(const Consensus::Params &params, const int32_t nHeightPrev) {
-    return nHeightPrev >= GetUpgrade11ActivationHeight(params);
+    return nHeightPrev >= g_Upgrade11HeightOverride.value_or(params.upgrade11Height);
 }
 
 bool IsUpgrade11Enabled(const Consensus::Params &params, const CBlockIndex *pindexPrev) {
@@ -157,14 +154,12 @@ bool IsUpgrade11Enabled(const Consensus::Params &params, const CBlockIndex *pind
 }
 
 // Upgrade 12
-static bool IsUpgrade12Enabled(const Consensus::Params &params, const int64_t nMedianTimePast) {
-    return nMedianTimePast >= gArgs.GetArg("-upgrade12activationtime", params.upgrade12ActivationTime);
-}
 
 bool IsUpgrade12Enabled(const Consensus::Params &params, const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
         return false;
     }
 
-    return IsUpgrade12Enabled(params, pindexPrev->GetMedianTimePast());
+    return pindexPrev->GetMedianTimePast() >=
+           gArgs.GetArg("-upgrade12activationtime", params.upgrade12ActivationTime);
 }

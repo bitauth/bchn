@@ -595,6 +595,9 @@ static fs::path StartupShortcutPath() {
     if (chain == CBaseChainParams::CHIPNET) {
         return GetSpecialFolderPath(CSIDL_STARTUP) / "Bitcoin Cash Node (chipnet).lnk";
     }
+    if (chain == CBaseChainParams::TEMPNET) {
+        return GetSpecialFolderPath(CSIDL_STARTUP) / "Bitcoin Cash Node (tempnet).lnk";
+    }
     return GetSpecialFolderPath(CSIDL_STARTUP) /
            strprintf("Bitcoin Cash Node (%s).lnk", chain); // If we get here: "regtest"
 }

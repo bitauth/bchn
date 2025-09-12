@@ -12,6 +12,7 @@
 
 #include <limits>
 #include <optional>
+#include <vector>
 
 namespace Consensus {
 
@@ -57,6 +58,13 @@ struct Params {
     int upgrade11Height;
     /** Unix time used for tentative MTP activation of 15 May 2026 12:00:00 UTC upgrade */
     int64_t upgrade12ActivationTime;
+    /** Default time for software_outdated warnings (non-consensus). <=0 disables. */
+    int64_t softwareExpiryTime = 0;
+
+    /** Raw tx required in the first block after tempnet activates (tempnet-only). */
+    std::vector<unsigned char> upgrade12ActivationTx;
+    /** Precomputed txid of the activation tx. */
+    uint256 upgrade12ActivationTxid;
 
     /** Default blocksize limit -- can be overridden with the -excessiveblocksize= command-line switch.
         After activation of upgrade 10, this is the minimum max block size, since the ABLA algorithm allows for

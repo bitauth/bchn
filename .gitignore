@@ -144,3 +144,4 @@ nbproject/
 
 #Local Development Environment - Visual Studio Code
 .vscode
+.ccache

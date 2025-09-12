@@ -18,7 +18,8 @@
 #include <future>
 
 TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
-                          const bool allowhighfees) {
+                          const bool allowhighfees,
+                          const bool wait_for_wallet) {
     std::promise<void> promise;
     const TxId &txid = tx->GetId();
 
@@ -58,14 +59,22 @@ TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
                 throw JSONRPCError(RPC_TRANSACTION_ERROR,
                                    FormatStateMessage(state));
             } else {
-                // If wallet is enabled, ensure that the wallet has been made
+                // If wait_for_wallet, ensure that the wallet has been made
                 // aware of the new transaction prior to returning. This
                 // prevents a race where a user might call sendrawtransaction
                 // with a transaction to/from their wallet, immediately call
                 // some wallet RPC, and get a stale result because callbacks
                 // have not yet been processed.
-                CallFunctionInValidationInterfaceQueue(
-                    [&promise] { promise.set_value(); });
+                if (wait_for_wallet) {
+                    CallFunctionInValidationInterfaceQueue(
+                        [&promise] { promise.set_value(); });
+                } else {
+                    // Do not queue-and-wait when we're already executing on
+                    // the validation interface queue (e.g. broadcasts
+                    // triggered from tip updates). Skipping the wait avoids a
+                    // deadlock of the single-threaded queue.
+                    promise.set_value();
+                }
             }
         } else if (fHaveChain) {
             throw JSONRPCError(RPC_TRANSACTION_ALREADY_IN_CHAIN,
@@ -77,7 +86,9 @@ TxId BroadcastTransaction(const Config &config, const CTransactionRef tx,
         }
     } // cs_main
 
-    promise.get_future().wait();
+    if (wait_for_wallet) {
+        promise.get_future().wait();
+    }
 
     if (!g_connman) {
         throw JSONRPCError(

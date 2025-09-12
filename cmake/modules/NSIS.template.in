@@ -99,6 +99,7 @@ Section -post SEC0001
     CreateShortcut "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (testnet4).lnk" "$INSTDIR\${BITCOIN_GUI_NAME}" "-testnet4" "$INSTDIR\${BITCOIN_GUI_NAME}" 1
     CreateShortcut "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (scalenet).lnk" "$INSTDIR\${BITCOIN_GUI_NAME}" "-scalenet" "$INSTDIR\${BITCOIN_GUI_NAME}" 1
     CreateShortcut "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (chipnet).lnk" "$INSTDIR\${BITCOIN_GUI_NAME}" "-chipnet" "$INSTDIR\${BITCOIN_GUI_NAME}" 1
+    CreateShortcut "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (tempnet).lnk" "$INSTDIR\${BITCOIN_GUI_NAME}" "-tempnet" "$INSTDIR\${BITCOIN_GUI_NAME}" 1
     CreateShortcut "$SMPROGRAMS\$StartMenuGroup\Uninstall $(^Name).lnk" $INSTDIR\uninstall.exe
     !insertmacro MUI_STARTMENU_WRITE_END
     WriteRegStr HKCU "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$(^Name)" DisplayName "$(^Name)"
@@ -146,11 +147,13 @@ Section -un.post UNSEC0001
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (testnet4).lnk"
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (scalenet).lnk"
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (chipnet).lnk"
+    Delete /REBOOTOK "$SMPROGRAMS\$StartMenuGroup\@CPACK_NSIS_DISPLAY_NAME@ (tempnet).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node.lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (testnet).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (testnet4).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (scalenet).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (chipnet).lnk"
+    Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (tempnet).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Bitcoin Cash Node (regtest).lnk"
     Delete /REBOOTOK "$INSTDIR\uninstall.exe"
     Delete /REBOOTOK "$INSTDIR\debug.log"

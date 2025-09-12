@@ -581,6 +581,7 @@ add_library(server
   net_processing.cpp
   node/blockstorage.cpp
   node/transaction.cpp
+  node/txbroadcastqueue.cpp
   noui.cpp
   outputtype.cpp
   policy/fees.cpp

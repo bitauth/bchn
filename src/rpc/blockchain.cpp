@@ -28,6 +28,7 @@
 #include <rpc/server_util.h>
 #include <rpc/util.h>
 #include <script/descriptor.h>
+#include <consensus/activation.h>
 #include <streams.h>
 #include <sync.h>
 #include <txdb.h>
@@ -1599,6 +1600,36 @@ UniValue getblockchaininfo(const Config &config,
         if (automatic_pruning) {
             obj.emplace_back("prune_target_size", nPruneTarget);
         }
+    }
+
+    {
+        const auto &consensus = config.GetChainParams().GetConsensus();
+        const int64_t activation_mtp = gArgs.GetArg("-upgrade12activationtime", consensus.upgrade12ActivationTime);
+        const int64_t expiry_mtp = consensus.softwareExpiryTime;
+        const bool mempool_activated = IsUpgrade12Enabled(consensus, tip);
+
+        UniValue::Object up;
+        up.reserve(6);
+        up.emplace_back("name", strprintf("May 2026 Upgrade (%s)", config.GetChainParams().NetworkIDString()));
+        up.emplace_back("mempool_activation_mtp", activation_mtp);
+        // For time-based activation, block activation height is only known once activation is reached; until then null
+        if (mempool_activated && tip) {
+            const CBlockIndex *activationBlock = g_upgrade12_block_tracker.GetActivationBlock(tip, consensus);
+            if (activationBlock) {
+                up.emplace_back("block_activation_height", static_cast<int64_t>(activationBlock->nHeight));
+                up.emplace_back("block_activation_hash", activationBlock->GetBlockHash().GetHex());
+            } else {
+                up.emplace_back("block_activation_height", UniValue());
+                up.emplace_back("block_activation_hash", UniValue());
+            }
+        } else {
+            up.emplace_back("block_activation_height", UniValue());
+            up.emplace_back("block_activation_hash", UniValue());
+        }
+        up.emplace_back("software_expiration_mtp", expiry_mtp);
+        up.emplace_back("mempool_activated", mempool_activated);
+
+        obj.emplace_back("upgrade_status", std::move(up));
     }
 
     obj.emplace_back("warnings", GetWarnings("statusbar"));

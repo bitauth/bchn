@@ -27,6 +27,7 @@
 #include <hash.h>
 #include <index/txindex.h>
 #include <node/blockstorage.h>
+#include <node/txbroadcastqueue.h>
 #include <policy/fees.h>
 #include <policy/mempool.h>
 #include <policy/policy.h>
@@ -41,6 +42,7 @@
 #include <script/standard.h>
 #include <shutdown.h>
 #include <span.h>
+#include <sync.h>
 #include <timedata.h>
 #include <tinyformat.h>
 #include <txdb.h>
@@ -62,10 +64,11 @@
 #include <deque>
 #include <limits>
 #include <list>
-#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
+#include <optional>
 
 #define MICRO 0.000001
 #define MILLI 0.001
@@ -2170,6 +2173,8 @@ static void UpdateTip(const Config &config, CBlockIndex *pindexNew)
     // Tell rest of codebase (in particular ABLA) about new tip
     TipChanged(config, pindexNew);
 
+    ProcessTxBroadcastQueue(config, pindexNew);
+
     // New best block
     g_mempool.AddTransactionsUpdated(1);
 
@@ -3811,6 +3816,9 @@ static bool ContextualCheckBlock(const CBlock &block, CValidationState &state,
             !std::equal(expect.begin(), expect.end(), block.vtx[0]->vin[0].scriptSig.begin())) {
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-height", false, "block height mismatch in coinbase");
         }
+    }
+    if (!CheckUpgrade12ActivationTx(params, block, pindexPrev, state)) {
+        return false;
     }
 
     return true;
@@ -5842,6 +5850,33 @@ double GuessVerificationProgress(const ChainTxData &data,
 
 ActivationBlockTracker g_upgrade12_block_tracker(&IsUpgrade12Enabled);
 
+bool CheckUpgrade12ActivationTx(const Consensus::Params &params,
+                                const CBlock &block,
+                                const CBlockIndex *pindexPrev,
+                                CValidationState &state) {
+    if (params.upgrade12ActivationTx.empty()) {
+        return true;
+    }
+    if (!IsUpgrade12Enabled(params, pindexPrev)) {
+        return true;
+    }
+    const CBlockIndex *activationBlock;
+    {
+        LOCK(cs_main);
+        activationBlock = g_upgrade12_block_tracker.GetActivationBlock(pindexPrev, params);
+    }
+    if (activationBlock != pindexPrev) {
+        return true;
+    }
+    const uint256 &txid = params.upgrade12ActivationTxid;
+    for (const auto &tx : block.vtx) {
+        if (tx->GetId() == txid) {
+            return true;
+        }
+    }
+    return state.DoS(100, false, REJECT_INVALID, "missing-activation-tx");
+}
+
 const CBlockIndex *
 ActivationBlockTracker::GetActivationBlock(const CBlockIndex *pindex, const Consensus::Params &params)
     EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
@@ -5877,7 +5912,7 @@ ActivationBlockTracker::GetActivationBlock(const CBlockIndex *pindex, const Cons
     while (pwalk->pprev) {
         // first, skip backwards testing predicate
         // The below code leverages CBlockIndex::pskip to walk back efficiently.
-        if (predicate(params, pwalk->pskip)) {
+        if (pwalk->pskip && predicate(params, pwalk->pskip)) {
             // skip backward
             pwalk = pwalk->pskip;
             continue; // continue skipping

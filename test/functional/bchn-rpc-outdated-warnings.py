@@ -63,9 +63,13 @@ class WarnOnOutdatedTest(BitcoinTestFramework):
         calls = ["getmininginfo", "getnetworkinfo", "getblockchaininfo"]
 
         for c in calls:
+            # Good node: should not be outdated yet.
             assert WARNING_TEXT_SOON not in getattr(goodNode, c)()["warnings"]
-            assert WARNING_TEXT_SOON in getattr(outdatedNode, c)()["warnings"]
+            # Outdated node: allow a brief grace period for service init.
+            wait_until(lambda: WARNING_TEXT_SOON in getattr(outdatedNode, c)()["warnings"], timeout=5)
+            # Node with -noexpire: never shows outdated warnings.
             assert WARNING_TEXT_SOON not in getattr(supressingNode, c)()["warnings"]
+            # Node after upgrade time: shows the "expired" warning text.
             assert WARNING_TEXT_EXPIRED in getattr(afterUpgradeNode, c)()["warnings"]
 
         with goodNode.assert_debug_log(expected_msgs=[WARNING_TEXT_SOON], timeout=waitTime):

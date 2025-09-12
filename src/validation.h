@@ -26,12 +26,15 @@
 #include <script/script_metrics.h>
 #include <sync.h>
 #include <versionbits.h>
+#include <uint256.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <optional>
+#include <tuple>
 #include <set>
 #include <string>
 #include <utility>
@@ -613,6 +616,11 @@ bool TestBlockValidity(CValidationState &state, const CChainParams &params,
                        const CBlock &block, CBlockIndex *pindexPrev,
                        BlockValidationOptions validationOptions)
     EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
+bool CheckUpgrade12ActivationTx(const Consensus::Params &params,
+                                const CBlock &block,
+                                const CBlockIndex *pindexPrev,
+                                CValidationState &state);
 
 /**
  * RAII wrapper for VerifyDB: Verify consistency of the block and coin

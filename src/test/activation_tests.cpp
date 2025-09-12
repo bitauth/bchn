@@ -5,10 +5,13 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <consensus/activation.h>
+#include <consensus/merkle.h>
+#include <amount.h>
 #include <sync.h>
 #include <util/defer.h>
 #include <util/system.h>
 #include <validation.h>
+#include <streams.h>
 
 #include <test/setup_common.h>
 
@@ -375,6 +378,58 @@ BOOST_AUTO_TEST_CASE(test_upgrade12_activation_block_tracking) {
     block = g_upgrade12_block_tracker.GetActivationBlock(&blocksFork[5], params); // check fork
     BOOST_CHECK(block == &blocks[5]); // the chain we forked off of is still the activation block
     BOOST_CHECK(IsUpgrade12Enabled(params, block) && !IsUpgrade12Enabled(params, block->pprev));
+}
+
+BOOST_AUTO_TEST_CASE(check_upgrade12_activation_tx_rule) {
+    // Use mainnet params and override only what we need for this unit test.
+    const auto pparams = CreateChainParams(CBaseChainParams::MAIN);
+    const Consensus::Params &params_const = pparams->GetConsensus();
+    auto &params = const_cast<Consensus::Params &>(params_const);
+
+    // Build a small synthetic chain and set MTP just before and at activation.
+    const auto activation = gArgs.GetArg("-upgrade12activationtime", params.upgrade12ActivationTime);
+    std::array<CBlockIndex, 12> blocks;
+    for (size_t i = 1; i < blocks.size(); ++i) {
+        blocks[i].pprev = &blocks[i - 1];
+        if (i > 1) blocks[i].pskip = &blocks[i - 2];
+    }
+    SetMTP(blocks, activation);
+
+    // Prepare a dummy activation txid and inject into params.
+    CMutableTransaction mtx;
+    mtx.nVersion = 1;
+    const uint256 act_txid = CTransaction(mtx).GetId();
+    params.upgrade12ActivationTxid = act_txid;
+    // Ensure rule is considered enabled by setting a non-empty raw vector.
+    params.upgrade12ActivationTx = {0x00};
+
+    // The activation block is the previous index (pindexPrev) when we validate a new block.
+    const CBlockIndex *pindexPrev = nullptr;
+    {
+        LOCK(cs_main);
+        pindexPrev = g_upgrade12_block_tracker.GetActivationBlock(&blocks.back(), params);
+    }
+    BOOST_REQUIRE(pindexPrev != nullptr);
+    BOOST_CHECK(IsUpgrade12Enabled(params, pindexPrev));
+
+    // Case 1: block includes the required tx -> pass
+    CBlock block_ok;
+    {
+        CMutableTransaction cb;
+        block_ok.vtx.push_back(MakeTransactionRef(cb)); // coinbase placeholder
+    }
+    block_ok.vtx.push_back(MakeTransactionRef(mtx));
+    CValidationState state_ok;
+    BOOST_CHECK(CheckUpgrade12ActivationTx(params, block_ok, pindexPrev, state_ok));
+
+    // Case 2: block missing the required tx -> fail
+    CBlock block_bad;
+    {
+        CMutableTransaction cb;
+        block_bad.vtx.push_back(MakeTransactionRef(cb)); // coinbase placeholder
+    }
+    CValidationState state_bad;
+    BOOST_CHECK(!CheckUpgrade12ActivationTx(params, block_bad, pindexPrev, state_bad));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

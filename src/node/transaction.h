@@ -12,4 +12,5 @@ struct TxId;
 
 /** Broadcast a transaction */
 TxId BroadcastTransaction(const Config &config, CTransactionRef tx,
-                          bool allowhighfees = false);
+                          bool allowhighfees = false,
+                          bool wait_for_wallet = true);

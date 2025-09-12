@@ -9,8 +9,11 @@
 #include <chainparamsconstants.h>
 #include <chainparamsseeds.h>
 #include <consensus/consensus.h>
+#include <consensus/upgrade_times.h>
 #include <consensus/merkle.h>
 #include <netbase.h>
+#include <primitives/transaction.h>
+#include <streams.h>
 #include <tinyformat.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -149,8 +152,8 @@ public:
         // May 15, 2025 12:00:00 UTC protocol upgrade (this is one less than the first block mined under new rules)
         consensus.upgrade11Height = 898373;
 
-        // May 15, 2026 12:00:00 UTC tentative protocol upgrade
-        consensus.upgrade12ActivationTime = 1778846400;
+        consensus.upgrade12ActivationTime = Consensus::UpgradeTimes::MAY_2026;
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::MAY_2027;
 
         // Default limit for block size (in bytes)
         consensus.nDefaultConsensusBlockSize = DEFAULT_CONSENSUS_BLOCK_SIZE;
@@ -403,8 +406,8 @@ public:
         // May 15, 2025 12:00:00 UTC protocol upgrade (this is one less than the first block mined under new rules)
         consensus.upgrade11Height = 1658049;
 
-        // May 15, 2026 12:00:00 UTC tentative protocol upgrade
-        consensus.upgrade12ActivationTime = 1778846400;
+        consensus.upgrade12ActivationTime = Consensus::UpgradeTimes::MAY_2026;
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::MAY_2027;
 
         // Default limit for block size (in bytes)
         consensus.nDefaultConsensusBlockSize = DEFAULT_CONSENSUS_BLOCK_SIZE;
@@ -620,8 +623,8 @@ public:
         // May 15, 2025 12:00:00 UTC protocol upgrade (this is one less than the first block mined under new rules)
         consensus.upgrade11Height = 253318;
 
-        // May 15, 2026 12:00:00 UTC tentative protocol upgrade
-        consensus.upgrade12ActivationTime = 1778846400;
+        consensus.upgrade12ActivationTime = Consensus::UpgradeTimes::MAY_2026;
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::MAY_2027;
 
         // Default limit for block size (in bytes) (testnet4 is smaller at 2MB)
         consensus.nDefaultConsensusBlockSize = 2 * ONE_MEGABYTE;
@@ -807,8 +810,8 @@ public:
         // May 15, 2025 12:00:00 UTC protocol upgrade
         consensus.upgrade11Height = 10'006;
 
-        // May 15, 2026 12:00:00 UTC tentative protocol upgrade
-        consensus.upgrade12ActivationTime = 1778846400;
+        consensus.upgrade12ActivationTime = Consensus::UpgradeTimes::MAY_2026;
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::MAY_2027;
 
         // Default limit for block size (in bytes)
         consensus.nDefaultConsensusBlockSize = 256 * ONE_MEGABYTE;
@@ -967,8 +970,19 @@ public:
         // November 15, 2024 12:00:00 UTC; protocol upgrade activates 6 months early
         consensus.upgrade11Height = 227228; // (one less than upgrade block)
 
-        // November 15, 2025 12:00:00 UTC; tentative protocol upgrade activates 6 months early
-        consensus.upgrade12ActivationTime = 1763208000;
+        consensus.upgrade12ActivationTime = Consensus::UpgradeTimes::NOV_2025;
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::NOV_2026;
+
+        // Require and pre-queue a predefined activation transaction on chipnet.
+        static const char *const CHIPNET_ACTIVATION_TX_HEX =
+            "020000000130d1c3a524c4b208e6c1b558b110749f4ae1d431373b10a963f3ff9d873db75700000000040279015d00000000010000000000000000a9ef30d1c3a524c4b208e6c1b558b110749f4ae1d431373b10a963f3ff9d873db757608000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006a043230323600000000";
+        consensus.upgrade12ActivationTx = ParseHex(CHIPNET_ACTIVATION_TX_HEX);
+        {
+            CDataStream ss(consensus.upgrade12ActivationTx, SER_NETWORK, PROTOCOL_VERSION);
+            CMutableTransaction mtx;
+            ss >> mtx;
+            consensus.upgrade12ActivationTxid = CTransaction(mtx).GetId();
+        }
 
         // Default limit for block size (in bytes) (chipnet is like testnet4 in that it is smaller at 2MB)
         consensus.nDefaultConsensusBlockSize = 2 * ONE_MEGABYTE;
@@ -1068,6 +1082,22 @@ public:
         // 0000000051a23d96a852c1594fe00bff0e34ae283b68439b523bfa24eff3df1a
         // (height 208369) nt: 1720362372 ntx: 507137
         chainTxData = {1669512215 /* time */, 126405 /* numTx */, 0.0075 /* tx/sec */};
+    }
+};
+
+class CTempNetParams : public CChipNetParams {
+public:
+    CTempNetParams() {
+        strNetworkID = CBaseChainParams::TEMPNET;
+        // Tempnets activate the next consensus changes ahead of chipnet.
+        consensus.upgrade12ActivationTime = 1757937600; // Sep 15 2025 12:00:00 UTC
+        // Tempnets expire when the real chipnet activates the upgrade:
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::NOV_2025;
+        vSeeds.clear();
+        vFixedSeeds.clear();
+        vSeeds.emplace_back("tempnet.bitjson.com");
+        vSeeds.emplace_back("chipnet.bitjson.com");
+        vFixedSeeds.assign(std::begin(pnSeed6_tempnet), std::end(pnSeed6_tempnet));
     }
 };
 
@@ -1240,6 +1270,10 @@ std::unique_ptr<CChainParams> CreateChainParams(const std::string &chain) {
 
     if (chain == CBaseChainParams::CHIPNET) {
         return std::make_unique<CChipNetParams>();
+    }
+
+    if (chain == CBaseChainParams::TEMPNET) {
+        return std::make_unique<CTempNetParams>();
     }
 
     throw std::runtime_error(

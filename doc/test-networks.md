@@ -4,17 +4,18 @@ Test Networks
 This document describes the Bitcoin Cash test networks supported by the
 BCHN software.
 
-There are currently three test networks that you can access with BCHN:
+There are currently five test networks that you can access with BCHN:
 
 - testnet3 (historical testnet)
 - testnet4
 - scalenet
 - chipnet
+- tempnet
 
 These test network are maintained and supported by the wider community
 of protocol developers. They can be accessed by running the software
-(daemon, GUI and CLI) with `-testnet`, `-testnet4`, `-scalenet` and
-`-chipnet` arguments, respectively.
+(daemon, GUI and CLI) with `-testnet`, `-testnet4`, `-scalenet`,
+`-chipnet`, and `-tempnet` arguments, respectively.
 
 Other software clients may have additional test network definitions compiled
 into them but these are not currently supported by BCHN and could not be
@@ -89,15 +90,28 @@ Chipnet is intended as a place to test against upcoming Cash Improvement
 Proposals (CHIPs) which are intended to be activated in the next main network
 consensus upgrade.
 
-It therefore deploys these CHIPs (and updates to them) as much in advance as
-possible (optimally 6 months ahead of the main network upgrades).
+Chipnet deploys CHIPs 6 months ahead of the main network upgrades.
 
-After the upgrade to Adaptive Blocksize Limit Algorithm for Bitcoin Cash
-on this network in November 2023, the maximum blocksize of this network will
-vary dynamically with a floor capacity of 2MB.
+The maximum blocksize of Chipnet varies dynamically with a floor of 2MB.
+
+Tempnet
+-------
+
+A tempnet is any temporary fork of Chipnet that tests and previews a potential
+Chipnet upgrade. In the months before CHIPs are locked-in for a particular
+cycle, possible CHIPs for that cycle should be integrated and tested together
+via one or more coordinated public tempnets.
+
+Tempnet and Chipnet nodes pre-queue a predefined activation transaction for
+broadcast at the activation MTP. You can inspect and manage the broadcast
+queue via RPC:
 
 Overview Table for BCHN-supported Test Networks
 -----------------------------------------------
+
+This table summarizes parameters for testnet3, testnet4, scalenet, and chipnet.
+Tempnet parameters match chipnet (with the exception of the latest upgrade
+activation MTP/height), so it is not listed separately.
 
 | Attribute/Network            |  testnet3   |   testnet4   |  scalenet   |   chipnet   |
 |------------------------------|-------------|--------------|-------------|-------------|

@@ -64,7 +64,7 @@ ${BITCOIND} --help \
 cat >> "${EXAMPLE_CONF_FILE}" << 'EOF'
 
 # [Sections]
-# Most options apply to mainnet, testnet, testnet4, scalenet, chipnet, and regtest.
+# Most options apply to mainnet, testnet, testnet4, scalenet, chipnet, tempnet, and regtest.
 # If you want to confine an option to just one network, you should add it in the
 # relevant section below.
 # EXCEPTIONS: The options addnode, connect, port, bind, rpcport, rpcbind and wallet
@@ -84,6 +84,9 @@ cat >> "${EXAMPLE_CONF_FILE}" << 'EOF'
 
 # Options only for chipnet
 [chip]
+
+# Options only for tempnet
+[temp]
 
 # Options only for regtest
 [regtest]

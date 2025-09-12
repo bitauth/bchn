@@ -37,6 +37,7 @@
 #include <util/strencodings.h>
 #include <validation.h>
 #include <validationinterface.h>
+#include <node/txbroadcastqueue.h>
 
 #include <cstdint>
 #include <optional>
@@ -1392,6 +1393,136 @@ static UniValue sendrawtransaction(const Config &config,
     return BroadcastTransaction(config, tx, allowhighfees).GetHex();
 }
 
+static UniValue queuebroadcasttx(const Config &config,
+                                 const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() < 1 ||
+        request.params.size() > 3) {
+        throw std::runtime_error(
+            RPCHelpMan{"queuebroadcasttx",
+                       "\nQueue a raw transaction for broadcast once a given block height or MTP is reached.\n",
+                       {{"hexstring", RPCArg::Type::STR_HEX, /* opt */ false, /* default_val */ "", "The raw transaction hex"},
+                        {"height", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "", "Block height to broadcast at"},
+                        {"mtp", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "", "Median time past to broadcast at"}}}
+                .ToString() +
+            "\nResult:\n"
+            "\"txid\"             (string) The queued transaction hash\n"
+            "\nExamples:\n" +
+            HelpExampleCli("queuebroadcasttx", "\"rawhex\" 1000") +
+            HelpExampleCli("queuebroadcasttx", "\"rawhex\" null 1700000000"));
+    }
+
+    std::optional<int> height;
+    std::optional<int64_t> mtp;
+    if (!request.params[1].isNull()) {
+        height = request.params[1].get_int();
+    }
+    if (request.params.size() > 2 && !request.params[2].isNull()) {
+        mtp = request.params[2].get_int64();
+    }
+    if (height && mtp) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+                           "Cannot specify both height and mtp");
+    }
+    if (!height && !mtp) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+                           "Must specify height or mtp");
+    }
+    if (height && *height < 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "height must be non-negative");
+    }
+    if (mtp && *mtp < 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "mtp must be non-negative");
+    }
+
+    CMutableTransaction mtx;
+    if (!DecodeHexTx(mtx, request.params[0].get_str())) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+    }
+    CTransactionRef tx = MakeTransactionRef(mtx);
+
+    // Reject past triggers to avoid surprising behavior.
+    if (height) {
+        const int cur_height = WITH_LOCK(cs_main, return ::ChainActive().Height());
+        if (*height <= cur_height) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("height must be greater than current height (%d)", cur_height));
+        }
+    }
+    if (mtp) {
+        const int64_t cur_mtp = WITH_LOCK(cs_main, return ::ChainActive().Tip()->GetMedianTimePast());
+        if (*mtp < cur_mtp) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("mtp must be greater than or equal to current MTP (%d)", cur_mtp));
+        }
+    }
+    (void)EnqueueTxForBroadcast(tx, height, mtp);
+    return tx->GetId().GetHex();
+}
+
+static UniValue gettxbroadcastqueue(const Config &,
+                                    const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 0) {
+        throw std::runtime_error(
+            RPCHelpMan{"gettxbroadcastqueue",
+                       "\nList transactions queued for future broadcast, with triggers.\n",
+                       {}}
+                .ToString() +
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"txid\":  (string) The transaction id\n"
+            "    \"height\": (number or null) The target block height trigger\n"
+            "    \"mtp\":    (number or null) The target Median-Time-Past trigger\n"
+            "    \"size\":   (number) The serialized transaction size in bytes\n"
+            "  }, ...\n"
+            "]\n"
+            "\nExamples:\n"
+            + HelpExampleCli("gettxbroadcastqueue", "")
+        );
+    }
+
+    UniValue ret(UniValue::VARR);
+    for (const auto &e : GetTxBroadcastQueue()) {
+        UniValue o(UniValue::VOBJ);
+        auto &obj = o.get_obj();
+        const std::string &txid = std::get<0>(e);
+        const auto &height = std::get<1>(e);
+        const auto &mtp = std::get<2>(e);
+        const auto size = std::get<3>(e);
+        obj.emplace_back("txid", txid);
+        if (height) {
+            obj.emplace_back("height", static_cast<int64_t>(*height));
+        } else {
+            obj.emplace_back("height", NullUniValue);
+        }
+        if (mtp) {
+            obj.emplace_back("mtp", static_cast<int64_t>(*mtp));
+        } else {
+            obj.emplace_back("mtp", NullUniValue);
+        }
+        obj.emplace_back("size", static_cast<uint64_t>(size));
+        ret.get_array().push_back(o);
+    }
+    return ret;
+}
+
+static UniValue cancelbroadcasttx(const Config &,
+                                  const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 1) {
+        throw std::runtime_error(
+            RPCHelpMan{"cancelbroadcasttx",
+                       "\nCancel a queued transaction broadcast by txid.\n",
+                       {{"txid", RPCArg::Type::STR_HEX, /* opt */ false, /* default_val */ "", "The transaction id"}}}
+                .ToString() +
+            "\nResult:\n"
+            "true|false (boolean) Whether an entry was removed\n"
+            "\nExamples:\n" +
+            HelpExampleCli("cancelbroadcasttx", "\"<txid>\"")
+        );
+    }
+
+    const TxId txid(ParseHashV(request.params[0], "txid"));
+    return CancelQueuedTxBroadcast(txid);
+}
+
 static UniValue testmempoolaccept(const Config &config,
                                   const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() < 1 ||
@@ -2062,6 +2193,9 @@ static const ContextFreeRPCCommand commands[] = {
     { "rawtransactions",    "decoderawtransaction",      decoderawtransaction,      {"hexstring"} },
     { "rawtransactions",    "decodescript",              decodescript,              {"hexstring"} },
     { "rawtransactions",    "sendrawtransaction",        sendrawtransaction,        {"hexstring","allowhighfees"} },
+    { "rawtransactions",    "queuebroadcasttx",          queuebroadcasttx,          {"hexstring","height","mtp"} },
+    { "rawtransactions",    "gettxbroadcastqueue",       gettxbroadcastqueue,       {} },
+    { "rawtransactions",    "cancelbroadcasttx",         cancelbroadcasttx,         {"txid"} },
     { "rawtransactions",    "combinerawtransaction",     combinerawtransaction,     {"txs"} },
     { "rawtransactions",    "signrawtransactionwithkey", signrawtransactionwithkey, {"hexstring","privkeys","prevtxs","sighashtype"} },
     { "rawtransactions",    "testmempoolaccept",         testmempoolaccept,         {"rawtxs","allowhighfees"} },

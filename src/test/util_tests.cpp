@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <util/system.h>
+#include <consensus/upgrade_times.h>
 
 #include <clientversion.h>
 #include <primitives/transaction.h>
@@ -899,6 +900,31 @@ BOOST_AUTO_TEST_CASE(util_GetArg) {
     BOOST_CHECK_EQUAL(testArgs.GetArg("pritest4", "default"), "b");
 }
 
+BOOST_AUTO_TEST_CASE(util_RecognizedSections) {
+    TestArgsManager testArgs;
+    // config with recognized and unrecognized sections
+    const std::string conf =
+        "[temp]\n" // recognized
+        "server=1\n"
+        "[foo]\n"   // unrecognized
+        "bar=2\n";
+    std::istringstream streamConfig(conf);
+    std::string error;
+    // Ignore invalid keys to focus test on section-name recognition only.
+    BOOST_REQUIRE(testArgs.ReadConfigStream(streamConfig, "", error, true));
+
+    const auto unrec = testArgs.GetUnrecognizedSections();
+    // Ensure 'foo' is reported, and 'temp' is not.
+    bool sawFoo = false;
+    bool sawTemp = false;
+    for (const auto &si : unrec) {
+        if (si.m_name == CBaseChainParams::TEMPNET) sawTemp = true;
+        if (si.m_name == "foo") sawFoo = true;
+    }
+    BOOST_CHECK(!sawTemp);
+    BOOST_CHECK(sawFoo);
+}
+
 BOOST_AUTO_TEST_CASE(util_ClearArg) {
     TestArgsManager testArgs;
 
@@ -1076,6 +1102,43 @@ BOOST_AUTO_TEST_CASE(util_GetChainName) {
     BOOST_CHECK_THROW(test_args.GetChainName(), std::runtime_error);
 }
 
+BOOST_AUTO_TEST_CASE(util_GetChainName_tempnet_remap) {
+    // Verify that after the Nov 2025 upgrade time, -tempnet is interpreted as -chipnet.
+    TestArgsManager test_args;
+    test_args.SetupArgs({
+        {"-regtest", ArgsManager::ALLOW_BOOL},
+        {"-tempnet", ArgsManager::ALLOW_BOOL},
+        {"-chipnet", ArgsManager::ALLOW_BOOL},
+        {"-upgrade12activationtime", ArgsManager::ALLOW_ANY},
+    });
+
+    // Ensure we aren't in any particular network by default
+    const char *argv_empty[] = {"cmd"};
+    std::string error;
+    BOOST_CHECK(test_args.ParseParameters(1, (char **)argv_empty, error));
+
+    // 1) Before switch time: -tempnet selects tempnet
+    SetMockTime(Consensus::UpgradeTimes::NOV_2025 - 1);
+    const char *argv_temp1[] = {"cmd", "-tempnet"};
+    BOOST_CHECK(test_args.ParseParameters(2, (char **)argv_temp1, error));
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), CBaseChainParams::TEMPNET);
+
+    // 2) At/after switch time: -tempnet selects chipnet
+    SetMockTime(Consensus::UpgradeTimes::NOV_2025);
+    const char *argv_temp2[] = {"cmd", "-tempnet"};
+    BOOST_CHECK(test_args.ParseParameters(2, (char **)argv_temp2, error));
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), CBaseChainParams::CHIPNET);
+
+    // 3) After switch time: "-regtest -tempnet" should still select regtest (no invalid-combination error)
+    SetMockTime(Consensus::UpgradeTimes::NOV_2025 + 1);
+    const char *argv_both2[] = {"cmd", "-regtest", "-tempnet"};
+    BOOST_CHECK(test_args.ParseParameters(3, (char **)argv_both2, error));
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), CBaseChainParams::REGTEST);
+
+    // Reset mock time
+    SetMockTime(0);
+}
+
 // Test different ways settings can be merged, and verify results. This test can
 // be used to confirm that updates to settings code don't change behavior
 // unintentionally.
@@ -1226,11 +1289,10 @@ BOOST_FIXTURE_TEST_CASE(util_SettingsMerge, SettingsMergeTestingSetup) {
                           bool force_set, const std::string &section,
                           const std::string &network, bool net_specific) {
         TestArgsManager parser;
-        LOCK(parser.cs_args);
 
         std::string desc = "net=";
         desc += network;
-        parser.m_network = network;
+        parser.SelectConfigNetwork(network);
 
         const std::string &name = net_specific ? "server" : "wallet";
         const std::string key = "-" + name;

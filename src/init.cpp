@@ -19,6 +19,7 @@
 #include <compat/sanity.h>
 #include <config.h>
 #include <consensus/activation.h>
+#include <consensus/upgrade_times.h>
 #include <dsproof/dsproof.h>
 #include <dsproof/storage.h>
 #include <extversion.h>
@@ -38,9 +39,13 @@
 #include <net_permissions.h>
 #include <net_processing.h>
 #include <netbase.h>
+#include <primitives/transaction.h>
+#include <streams.h>
+#include <util/strencodings.h>
 #include <node/blockstorage.h>
 #include <policy/mempool.h>
 #include <policy/policy.h>
+#include <node/txbroadcastqueue.h>
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
 #include <rpc/register.h>
@@ -393,12 +398,14 @@ void SetupServerArgs() {
     const auto regtestBaseParams = CreateBaseChainParams(CBaseChainParams::REGTEST);
     const auto scalenetBaseParams = CreateBaseChainParams(CBaseChainParams::SCALENET);
     const auto chipnetBaseParams = CreateBaseChainParams(CBaseChainParams::CHIPNET);
+    const auto tempnetBaseParams = CreateBaseChainParams(CBaseChainParams::TEMPNET);
     const auto defaultChainParams = CreateChainParams(CBaseChainParams::MAIN);
     const auto testnetChainParams = CreateChainParams(CBaseChainParams::TESTNET);
     const auto testnet4ChainParams = CreateChainParams(CBaseChainParams::TESTNET4);
     const auto regtestChainParams = CreateChainParams(CBaseChainParams::REGTEST);
     const auto scalenetChainParams = CreateChainParams(CBaseChainParams::SCALENET);
     const auto chipnetChainParams = CreateChainParams(CBaseChainParams::CHIPNET);
+    const auto tempnetChainParams = CreateChainParams(CBaseChainParams::TEMPNET);
 
     // Hidden Options
     std::vector<std::string> hidden_args = {
@@ -486,12 +493,13 @@ void SetupServerArgs() {
                  strprintf("Before upgrade 10 activates: Do not accept blocks larger than this limit, in bytes."
                            " After upgrade 10 activates: The minimum (floor) maximum block size used by the adaptive"
                            " blocksize limit algorithm, in bytes. (default: %u, testnet: %u, testnet4: %u,"
-                           " scalenet: %u, chipnet: %u, regtest: %u)",
+                           " scalenet: %u, chipnet: %u, tempnet: %u, regtest: %u)",
                            defaultChainParams->GetConsensus().nDefaultConsensusBlockSize,
                            testnetChainParams->GetConsensus().nDefaultConsensusBlockSize,
                            testnet4ChainParams->GetConsensus().nDefaultConsensusBlockSize,
                            scalenetChainParams->GetConsensus().nDefaultConsensusBlockSize,
                            chipnetChainParams->GetConsensus().nDefaultConsensusBlockSize,
+                           tempnetChainParams->GetConsensus().nDefaultConsensusBlockSize,
                            regtestChainParams->GetConsensus().nDefaultConsensusBlockSize),
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     gArgs.AddArg("-feefilter",
@@ -529,12 +537,13 @@ void SetupServerArgs() {
                  "Imports blocks from external blk000??.dat file on startup",
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     gArgs.AddArg("-maxmempool=<n>", strprintf("Keep the transaction memory pool below <n> "
-                 "megabytes (default: %u, testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u)",
+                 "megabytes (default: %u, testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u, tempnet: %u)",
                  DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * defaultChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE,
                  DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * testnetChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE,
                  DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * testnet4ChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE,
                  DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * scalenetChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE,
-                 DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * chipnetChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE),
+                 DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * chipnetChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE,
+                 DEFAULT_MAX_MEMPOOL_SIZE_PER_MB * tempnetChainParams->GetConsensus().nDefaultConsensusBlockSize / ONE_MEGABYTE),
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     gArgs.AddArg("-maxorphantx=<n>",
                  strprintf("Keep at most <n> unconnectable transactions in "
@@ -664,10 +673,11 @@ void SetupServerArgs() {
                            "for IPv6. Append =onion to tag any incoming connections to that address and port as "
                            "incoming Tor connections (default: 127.0.0.1:%u=onion, testnet: 127.0.0.1:%u=onion, "
                            "testnet4: 127.0.0.1:%u=onion, scalenet: 127.0.0.1:%u=onion, chipnet: 127.0.0.1:%u=onion, "
-                           "regtest: 127.0.0.1:%u=onion)",
+                           "tempnet: 127.0.0.1:%u=onion, regtest: 127.0.0.1:%u=onion)",
                            defaultBaseParams->OnionServiceTargetPort(), testnetBaseParams->OnionServiceTargetPort(),
                            testnet4BaseParams->OnionServiceTargetPort(), scalenetBaseParams->OnionServiceTargetPort(),
-                           chipnetBaseParams->OnionServiceTargetPort(), regtestBaseParams->OnionServiceTargetPort()),
+                           chipnetBaseParams->OnionServiceTargetPort(), tempnetBaseParams->OnionServiceTargetPort(),
+                           regtestBaseParams->OnionServiceTargetPort()),
                  ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg(
         "-connect=<ip>",
@@ -743,12 +753,13 @@ void SetupServerArgs() {
                  ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-port=<port>",
                  strprintf("Listen for connections on <port> (default: %u, "
-                           "testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u, regtest: %u)",
+                           "testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u, tempnet: %u, regtest: %u)",
                            defaultChainParams->GetDefaultPort(),
                            testnetChainParams->GetDefaultPort(),
                            testnet4ChainParams->GetDefaultPort(),
                            scalenetChainParams->GetDefaultPort(),
                            chipnetChainParams->GetDefaultPort(),
+                           tempnetChainParams->GetDefaultPort(),
                            regtestChainParams->GetDefaultPort()),
                  ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-proxy=<ip:port>", "Connect through SOCKS5 proxy", ArgsManager::ALLOW_ANY,
@@ -985,42 +996,52 @@ void SetupServerArgs() {
     gArgs.AddArg(
         "-upgrade9activationheight=<n>",
         strprintf("Activation height of the May 2023 Bitcoin Cash Network Upgrade; first block using new rules will be"
-                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, regtest: %d)",
+                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, tempnet: %d, regtest: %d)",
                   defaultChainParams->GetConsensus().upgrade9Height,
                   testnetChainParams->GetConsensus().upgrade9Height,
                   testnet4ChainParams->GetConsensus().upgrade9Height,
                   scalenetChainParams->GetConsensus().upgrade9Height,
                   chipnetChainParams->GetConsensus().upgrade9Height,
+                  tempnetChainParams->GetConsensus().upgrade9Height,
                   regtestChainParams->GetConsensus().upgrade9Height),
         true, OptionsCategory::DEBUG_TEST);
     gArgs.AddArg(
         "-upgrade10activationheight=<n>",
         strprintf("Activation height of the May 2024 Bitcoin Cash Network Upgrade; first block using new rules will be"
-                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, regtest: %d)",
+                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, tempnet: %d, regtest: %d)",
                   defaultChainParams->GetConsensus().upgrade10Height,
                   testnetChainParams->GetConsensus().upgrade10Height,
                   testnet4ChainParams->GetConsensus().upgrade10Height,
                   scalenetChainParams->GetConsensus().upgrade10Height,
                   chipnetChainParams->GetConsensus().upgrade10Height,
+                  tempnetChainParams->GetConsensus().upgrade10Height,
                   regtestChainParams->GetConsensus().upgrade10Height),
         true, OptionsCategory::DEBUG_TEST);
     gArgs.AddArg(
         "-upgrade11activationheight=<n>",
         strprintf("Activation height of the May 2025 Bitcoin Cash Network Upgrade; first block using new rules will be"
-                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, regtest: %d)",
+                  " after this height (default: %d, testnet: %d, testnet4: %d, scalenet: %d, chipnet: %d, tempnet: %d, regtest: %d)",
                   defaultChainParams->GetConsensus().upgrade11Height,
                   testnetChainParams->GetConsensus().upgrade11Height,
                   testnet4ChainParams->GetConsensus().upgrade11Height,
                   scalenetChainParams->GetConsensus().upgrade11Height,
                   chipnetChainParams->GetConsensus().upgrade11Height,
+                  tempnetChainParams->GetConsensus().upgrade11Height,
                   regtestChainParams->GetConsensus().upgrade11Height),
         true, OptionsCategory::DEBUG_TEST);
     gArgs.AddArg(
         "-upgrade12activationtime=<n>",
         strprintf("Activation time of the tentative May 2026 Bitcoin Cash Network Upgrade (<n> seconds since epoch, "
-                  "default: %d, chipnet: %d)",
+                  "default: %d, chipnet: %d, tempnet: %d)",
                   defaultChainParams->GetConsensus().upgrade12ActivationTime,
-                  chipnetChainParams->GetConsensus().upgrade12ActivationTime),
+                  chipnetChainParams->GetConsensus().upgrade12ActivationTime,
+                  tempnetChainParams->GetConsensus().upgrade12ActivationTime),
+        true, OptionsCategory::DEBUG_TEST);
+    
+    gArgs.AddArg(
+        "-upgrade12activationtx=<hex>",
+        "Hex-encoded raw transaction to require in the first block after the tentative May 2026 upgrade activates "
+        "(chipnet/tempnet; optional override of the preset). On other networks this option is ignored.",
         true, OptionsCategory::DEBUG_TEST);
     gArgs.AddArg(
         "-printtoconsole",
@@ -1123,25 +1144,27 @@ void SetupServerArgs() {
                  ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::NODE_RELAY);
 
     gArgs.AddArg("-blockmaxsize=<n>",
-                 strprintf("Set maximum mined block size in bytes (default: %u, testnet: %u, testnet4: %u,"
-                           " scalenet: %u, chipnet: %u, regtest: %u)",
+                 strprintf("Set maximum mined block size in bytes (default: %u, testnet: %u, testnet4: %u," 
+                           " scalenet: %u, chipnet: %u, tempnet: %u, regtest: %u)",
                            defaultChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
                            testnetChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
                            testnet4ChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
                            scalenetChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
                            chipnetChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
+                           tempnetChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes(),
                            regtestChainParams->GetConsensus().GetDefaultGeneratedBlockSizeBytes()),
                  ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
     gArgs.AddArg("-percentblockmaxsize=<percent>",
                  strprintf("Set maximum mined block size as a floating-point percentage of the excessive block size."
                            " This is an alternative to -blockmaxsize. This option and -blockmaxsize cannot both be"
-                           " specified at the same time. (default: %.1f, testnet: %.1f, testnet4: %.1f,"
-                           " scalenet: %.3f, chipnet: %.1f, regtest: %.1f)",
+                           " specified at the same time. (default: %.1f, testnet: %.1f, testnet4: %.1f," 
+                           " scalenet: %.3f, chipnet: %.1f, tempnet: %.1f, regtest: %.1f)",
                            defaultChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
                            testnetChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
                            testnet4ChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
                            scalenetChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
                            chipnetChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
+                           tempnetChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent,
                            regtestChainParams->GetConsensus().nDefaultGeneratedBlockSizePercent),
                  ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
 
@@ -1210,12 +1233,13 @@ void SetupServerArgs() {
         ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
     gArgs.AddArg("-rpcport=<port>",
                  strprintf("Listen for JSON-RPC connections on <port> "
-                           "(default: %u, testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u, regtest: %u)",
+                           "(default: %u, testnet: %u, testnet4: %u, scalenet: %u, chipnet: %u, tempnet: %u, regtest: %u)",
                            defaultBaseParams->RPCPort(),
                            testnetBaseParams->RPCPort(),
                            testnet4BaseParams->RPCPort(),
                            scalenetBaseParams->RPCPort(),
                            chipnetBaseParams->RPCPort(),
+                           tempnetBaseParams->RPCPort(),
                            regtestBaseParams->RPCPort()),
                  ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::RPC);
     gArgs.AddArg("-rpcallowip=<ip>",
@@ -1621,6 +1645,29 @@ bool AppInitParameterInteraction(Config &config) {
     for (const auto &section : gArgs.GetUnrecognizedSections()) {
         InitWarning(strprintf("%s:%i " + _("Section [%s] is not recognized."),
                               section.m_file, section.m_line, section.m_name));
+    }
+
+    if (gArgs.IsArgSet("-upgrade12activationtx")) {
+        const bool tempnet_requested = gArgs.IsArgSet("-tempnet");
+        // After the real chipnet upgrade, -tempnet is interpreted as -chipnet.
+        const bool tempnetShutdown = GetTime() >= Consensus::UpgradeTimes::NOV_2025;
+        if (tempnet_requested && tempnetShutdown) {
+            InitWarning("Past tempnet shutdown, ignoring -tempnet and -upgrade12activationtx.");
+        } else if (chainparams.NetworkIDString() == CBaseChainParams::CHIPNET ||
+                   chainparams.NetworkIDString() == CBaseChainParams::TEMPNET) {
+            auto &mutableParams = const_cast<Consensus::Params &>(chainparams.GetConsensus());
+            mutableParams.upgrade12ActivationTx = ParseHex(gArgs.GetArg("-upgrade12activationtx", ""));
+            CDataStream ss(mutableParams.upgrade12ActivationTx, SER_NETWORK, PROTOCOL_VERSION);
+            CMutableTransaction mtx;
+            try {
+                ss >> mtx;
+                mutableParams.upgrade12ActivationTxid = CTransaction(mtx).GetId();
+            } catch (const std::exception &e) {
+                return InitError(strprintf("Invalid -upgrade12activationtx: %s", e.what()));
+            }
+        } else {
+            InitWarning("Ignoring -upgrade12activationtx: unsupported on this network.");
+        }
     }
 
     if (!fs::is_directory(GetBlocksDir())) {
@@ -2102,6 +2149,18 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     LogPrintf("Default data directory %s\n", GetDefaultDataDir().string());
     LogPrintf("Using data directory %s\n", GetDataDir().string());
 
+    // Queue the network activation transaction if configured for this network.
+    {
+        const auto &params = config.GetChainParams().GetConsensus();
+        if (!params.upgrade12ActivationTx.empty()) {
+            CDataStream ss(params.upgrade12ActivationTx, SER_NETWORK, PROTOCOL_VERSION);
+            CMutableTransaction mtx;
+            ss >> mtx;
+            (void)EnqueueTxForBroadcast(MakeTransactionRef(mtx), std::nullopt,
+                                        params.upgrade12ActivationTime);
+        }
+    }
+
     // Only log conf file usage message if conf file actually exists.
     fs::path config_file_path =
         GetConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
@@ -2197,10 +2256,11 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
      * Set up the "software outdated" mechanism.
      */
     if (gArgs.GetBoolArg("-expire", software_outdated::DEFAULT_EXPIRE)) {
-        // The software outdated warning will start to happen 30 days before May 15th, 2026;
-        // on -chipnet this date is 30 days before Nov. 15th, 2025.
-        software_outdated::nTime = gArgs.GetArg("-upgrade12activationtime",
-                                                chainparams.GetConsensus().upgrade12ActivationTime);
+        // Software-outdated warning starts 30 days before expiry time.
+        const int64_t expiry_default = chainparams.GetConsensus().softwareExpiryTime;
+        // Not CLI-configurable: use per-network default; if unset (0), fall back to next tentative upgrade MTP.
+        const int64_t fallback_upgrade_time = gArgs.GetArg("-upgrade12activationtime", chainparams.GetConsensus().upgrade12ActivationTime);
+        software_outdated::nTime = (expiry_default != 0) ? expiry_default : fallback_upgrade_time;
         if (software_outdated::nTime > 0) {
             software_outdated::fDisableRPCOnExpiry =
                     gArgs.GetBoolArg("-expirerpc", software_outdated::DEFAULT_EXPIRE_RPC);
@@ -2213,6 +2273,18 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     } else {
         // -expire=0 - software outdated warning is disabled
         software_outdated::nTime = 0;
+    }
+
+    if (chainparams.NetworkIDString() == CBaseChainParams::TEMPNET) {
+        // Tempnet automatically shuts down after the real chipnet upgrade.
+        const int64_t shutdown_time = chainparams.GetConsensus().softwareExpiryTime + 2 * 60 * 60; // +2 hours
+        const int64_t now = GetTime();
+        const int64_t ms = std::max<int64_t>((shutdown_time - now) * 1000, 100);
+        scheduler.scheduleFromNow([] {
+            LogPrintf("Tempnet: auto-shutdown after upgrade grace period elapsed.\n");
+            StartShutdown();
+        }, ms);
+        LogPrintf("Tempnet: scheduling auto-shutdown at %d (ms from now: %lld)\n", shutdown_time, (long long)ms);
     }
 
 

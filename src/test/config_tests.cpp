@@ -75,6 +75,9 @@ BOOST_AUTO_TEST_CASE(chain_params) {
 
     SelectParams(CBaseChainParams::CHIPNET);
     BOOST_CHECK_EQUAL(&Params(), &config.GetChainParams());
+
+    SelectParams(CBaseChainParams::TEMPNET);
+    BOOST_CHECK_EQUAL(&Params(), &config.GetChainParams());
 }
 
 BOOST_AUTO_TEST_CASE(generated_block_size_percent) {

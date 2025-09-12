@@ -19,6 +19,7 @@ class Chain(Enum):
     TestNet4 = "TESTNET4"
     ScaleNet = "SCALENET"
     ChipNet = "CHIPNET"
+    TempNet = "TEMPNET"
 
 
 def get_chainparams(rpc_caller, block):
@@ -38,6 +39,8 @@ def get_chainparams(rpc_caller, block):
                  "edit this script to comment-out this line of code.")
     elif chaininfo['chain'] == 'chip':
         chain = Chain.ChipNet
+    elif chaininfo['chain'] == 'temp':
+        chain = Chain.TempNet
     else:
         raise NotImplementedError
 
@@ -86,7 +89,7 @@ if __name__ == "__main__":
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--address', '-a', default="127.0.0.1:8332",
                         help="Node address for making RPC calls.\n"
-                             "The chain (MainNet, TestNet, TestNet4, ScaleNet) will be automatically detected.\n"
+                             "The chain (MainNet, TestNet, TestNet4, ScaleNet, ChipNet, TempNet) will be automatically detected.\n"
                              "Default: '127.0.0.1:8332'")
     parser.add_argument('--block', '-b',
                         help="The block hash or height to use for fetching chainparams.\n"
