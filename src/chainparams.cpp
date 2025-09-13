@@ -1089,10 +1089,12 @@ class CTempNetParams : public CChipNetParams {
 public:
     CTempNetParams() {
         strNetworkID = CBaseChainParams::TEMPNET;
+        consensus.upgrade12ActivationTime = 1757793600; // TODO delete: testing 2025-09-13T20:00:00.000Z
+        consensus.softwareExpiryTime = Consensus::UpgradeTimes::NOV_2025; // TODO delete: testing 2025-09-14T08:00:00.000Z
         // Tempnets activate the next consensus changes ahead of chipnet.
-        consensus.upgrade12ActivationTime = 1757937600; // Sep 15 2025 12:00:00 UTC
+        // TODO uncomment: consensus.upgrade12ActivationTime = 1757937600; // Sep 15 2025 12:00:00 UTC
         // Tempnets expire when the real chipnet activates the upgrade:
-        consensus.softwareExpiryTime = Consensus::UpgradeTimes::NOV_2025;
+        // TODO uncomment: consensus.softwareExpiryTime = Consensus::UpgradeTimes::NOV_2025;
         vSeeds.clear();
         vFixedSeeds.clear();
         vSeeds.emplace_back("tempnet.bitjson.com");
