@@ -584,6 +584,96 @@ BOOST_AUTO_TEST_CASE(rpc_convert_values_generatetoaddress) {
     BOOST_CHECK_EQUAL(result[2].get_int(), 9);
 }
 
+BOOST_AUTO_TEST_CASE(rpc_convert_values_queuebroadcasttx) {
+    UniValue::Array result;
+
+    // Height as number (locktime-style)
+    BOOST_CHECK_NO_THROW(result = RPCConvertValues(
+                             "queuebroadcasttx",
+                             {"deadbeef", "270800"}));
+    BOOST_CHECK_EQUAL(result[0].get_str(), "deadbeef");
+    BOOST_CHECK_EQUAL(result[1].get_int(), 270800);
+
+    // MTP (>=500000000) as number
+    BOOST_CHECK_NO_THROW(result = RPCConvertValues(
+                             "queuebroadcasttx",
+                             {"deadbeef", "1700000000"}));
+    BOOST_CHECK_EQUAL(result[1].get_int64(), 1700000000);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_queuebroadcasttx_locktime_semantics) {
+    // Use a known-good signed raw tx hex from prior tests
+    const std::string rawtx =
+        "0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a9"
+        "9ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0ef"
+        "e71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b17"
+        "36ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc31071"
+        "1c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b383"
+        "9e2bbf32d826a1e222031fd888ac00000000";
+
+    // Missing height_or_mtp
+    bool threw = false;
+    try {
+        (void)CallRPC(std::string("queuebroadcasttx ") + rawtx);
+    } catch (const std::runtime_error &e) {
+        threw = true;
+        BOOST_CHECK(std::string(e.what()).find("Must specify height_or_mtp") != std::string::npos);
+    }
+    BOOST_CHECK(threw);
+
+    // Null height_or_mtp
+    threw = false;
+    try {
+        (void)CallRPC(std::string("queuebroadcasttx ") + rawtx + " null");
+    } catch (const std::runtime_error &e) {
+        threw = true;
+        BOOST_CHECK(std::string(e.what()).find("Must specify height_or_mtp") != std::string::npos);
+    }
+    BOOST_CHECK(threw);
+
+    // Out of range values
+    BOOST_CHECK_THROW(CallRPC(std::string("queuebroadcasttx ") + rawtx + " -1"), std::runtime_error);
+    BOOST_CHECK_THROW(CallRPC(std::string("queuebroadcasttx ") + rawtx + " 4294967296"), std::runtime_error);
+
+    // Height equal to or below current height should be rejected
+    threw = false;
+    try {
+        (void)CallRPC(std::string("queuebroadcasttx ") + rawtx + " 0");
+    } catch (const std::runtime_error &e) {
+        threw = true;
+        BOOST_CHECK(std::string(e.what()).find("height must be greater than current height") != std::string::npos);
+    }
+    BOOST_CHECK(threw);
+
+    // MTP less than current should be rejected (500000000 is far in the past)
+    threw = false;
+    try {
+        (void)CallRPC(std::string("queuebroadcasttx ") + rawtx + " 500000000");
+    } catch (const std::runtime_error &e) {
+        threw = true;
+        BOOST_CHECK(std::string(e.what()).find("mtp must be greater than or equal to current MTP") != std::string::npos);
+    }
+    BOOST_CHECK(threw);
+
+    // Valid future MTP should succeed and return txid
+    UniValue r = CallRPC(std::string("decoderawtransaction ") + rawtx);
+    const std::string txid = r.get_obj()["txid"].get_str();
+    UniValue r2 = CallRPC(std::string("queuebroadcasttx ") + rawtx + " 4102444800"); // year 2100
+    BOOST_CHECK_EQUAL(r2.get_str(), txid);
+    // Clean up any queued entry if present
+    (void)CallRPC(std::string("cancelbroadcasttx ") + txid);
+
+    // Upper bound inclusive should be accepted (4294967295)
+    UniValue r3 = CallRPC(std::string("queuebroadcasttx ") + rawtx + " 4294967295");
+    BOOST_CHECK_EQUAL(r3.get_str(), txid);
+    (void)CallRPC(std::string("cancelbroadcasttx ") + txid);
+
+    // Large height should be accepted (499999999 is height)
+    UniValue r4 = CallRPC(std::string("queuebroadcasttx ") + rawtx + " 499999999");
+    BOOST_CHECK_EQUAL(r4.get_str(), txid);
+    (void)CallRPC(std::string("cancelbroadcasttx ") + txid);
+}
+
 BOOST_AUTO_TEST_CASE(rpc_getblockstats_calculate_percentiles_by_size)
 {
     int64_t total_size = 200;

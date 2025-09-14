@@ -175,6 +175,7 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     { "addpeeraddress", 1, "port"},
     {"stop", 0, "wait"},
     {"fillmempool", 0, "megabytes"},
+    {"queuebroadcasttx", 1, "height_or_mtp"},
 };
 
 class CRPCConvertTable {

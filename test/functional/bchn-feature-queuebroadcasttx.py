@@ -55,7 +55,7 @@ class QueueBroadcastTxTest(BitcoinTestFramework):
         self._utxos = node.listunspent(1)
         self._utxo_idx = 0
 
-        # Height-triggered test
+        # Height-triggered test (locktime-style: <500000000)
         txid_h, raw_h = self.make_signed_tx(node)
         h_now = node.getblockcount()
         target_h = h_now + 1
@@ -77,14 +77,14 @@ class QueueBroadcastTxTest(BitcoinTestFramework):
         q = node.gettxbroadcastqueue()
         assert all(e["txid"] != txid_h for e in q)
 
-        # MTP-triggered test: use current MTP so next tip update triggers broadcast
+        # MTP-triggered test via locktime-style: use current MTP so next tip update triggers broadcast
         txid_m, raw_m = self.make_signed_tx(node)
         mtp_now = node.getblockheader(node.getbestblockhash())["mediantime"]
         target_mtp = mtp_now
-        qtxid2 = node.queuebroadcasttx(raw_m, None, target_mtp)
+        qtxid2 = node.queuebroadcasttx(raw_m, target_mtp)
         assert qtxid2 == txid_m
         q = node.gettxbroadcastqueue()
-        assert any(e["txid"] == txid_m and e["mtp"] == target_mtp for e in q)
+        assert any(e["txid"] == txid_m and e.get("mtp") == target_mtp for e in q)
         assert all("size" in e and isinstance(e["size"], int) and e["size"] > 0 for e in q)
         assert txid_m not in node.getrawmempool()
         self.generate(node, 1)
@@ -93,11 +93,9 @@ class QueueBroadcastTxTest(BitcoinTestFramework):
         # Error cases
         bad_tx_hex = "00"
         assert_raises_rpc_error(-22, "TX decode failed", node.queuebroadcasttx, bad_tx_hex, 1)
-        # Both height and mtp (reuse an existing tx to avoid burning UTXOs)
-        assert_raises_rpc_error(-8, "Cannot specify both height and mtp", node.queuebroadcasttx, raw_h, 1, int(time.time()) + 100)
         # None specified (reuse an existing tx)
         q_before = node.gettxbroadcastqueue()
-        assert_raises_rpc_error(-8, "Must specify height or mtp", node.queuebroadcasttx, raw_h)
+        assert_raises_rpc_error(-8, "Must specify height_or_mtp", node.queuebroadcasttx, raw_h)
         # Ensure the queue did not change on error
         assert node.gettxbroadcastqueue() == q_before
 

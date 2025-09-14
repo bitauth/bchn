@@ -74,7 +74,7 @@ bool EnqueueTxForBroadcast(const CTransactionRef &tx,
         LogPrint(BCLog::MEMPOOL,
                  "Queued tx %s for broadcast at height %d\n",
                  txid.ToString(), *height);
-    } else {
+    } else if (mtp) {
         LogPrint(BCLog::MEMPOOL,
                  "Queued tx %s for broadcast at MTP %d\n",
                  txid.ToString(), *mtp);

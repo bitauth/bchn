@@ -207,7 +207,7 @@ static void getrawtransaction_verbosity_2_helper(const Config &config, const CTr
 static UniValue getrawtransaction(const Config &config,
                                   const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() < 1 ||
-        request.params.size() > 3) {
+        request.params.size() > 2) {
         throw std::runtime_error(
             RPCHelpMan{"getrawtransaction",
                 "\nNOTE: By default this function only works for mempool transactions. If the -txindex option is\n"
@@ -1399,39 +1399,34 @@ static UniValue queuebroadcasttx(const Config &config,
         request.params.size() > 3) {
         throw std::runtime_error(
             RPCHelpMan{"queuebroadcasttx",
-                       "\nQueue a raw transaction for broadcast once a given block height or MTP is reached.\n",
+                       "\nQueue a raw transaction for broadcast once a given trigger is reached.\n"
+                       "The second argument behaves like nLockTime: a single integer in [0, 4294967295].\n"
+                       "Values < 500000000 are interpreted as a block height;\n"
+                       "values >= 500000000 are interpreted as a Median-Time-Past (BIP113) UNIX timestamp.\n",
                        {{"hexstring", RPCArg::Type::STR_HEX, /* opt */ false, /* default_val */ "", "The raw transaction hex"},
-                        {"height", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "", "Block height to broadcast at"},
-                        {"mtp", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "", "Median time past to broadcast at"}}}
+                        {"height_or_mtp", RPCArg::Type::NUM, /* opt */ false, /* default_val */ "", "Locktime-style trigger: block height (<500000000) or MTP timestamp (>=500000000)"}}}
                 .ToString() +
             "\nResult:\n"
             "\"txid\"             (string) The queued transaction hash\n"
             "\nExamples:\n" +
             HelpExampleCli("queuebroadcasttx", "\"rawhex\" 1000") +
-            HelpExampleCli("queuebroadcasttx", "\"rawhex\" null 1700000000"));
+            HelpExampleCli("queuebroadcasttx", "\"rawhex\" 1700000000"));
     }
 
+    // Parse args
     std::optional<int> height;
     std::optional<int64_t> mtp;
-    if (!request.params[1].isNull()) {
-        height = request.params[1].get_int();
+    if (request.params.size() <= 1 || request.params[1].isNull()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Must specify height_or_mtp");
     }
-    if (request.params.size() > 2 && !request.params[2].isNull()) {
-        mtp = request.params[2].get_int64();
+    const int64_t v = request.params[1].get_int64();
+    if (v < 0 || v > 0xFFFFFFFFLL) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "height_or_mtp out of range (must be 0..4294967295)");
     }
-    if (height && mtp) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-                           "Cannot specify both height and mtp");
-    }
-    if (!height && !mtp) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-                           "Must specify height or mtp");
-    }
-    if (height && *height < 0) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "height must be non-negative");
-    }
-    if (mtp && *mtp < 0) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "mtp must be non-negative");
+    if (v < 500000000) {
+        height = int(v);
+    } else {
+        mtp = v;
     }
 
     CMutableTransaction mtx;
@@ -2193,7 +2188,7 @@ static const ContextFreeRPCCommand commands[] = {
     { "rawtransactions",    "decoderawtransaction",      decoderawtransaction,      {"hexstring"} },
     { "rawtransactions",    "decodescript",              decodescript,              {"hexstring"} },
     { "rawtransactions",    "sendrawtransaction",        sendrawtransaction,        {"hexstring","allowhighfees"} },
-    { "rawtransactions",    "queuebroadcasttx",          queuebroadcasttx,          {"hexstring","height","mtp"} },
+    { "rawtransactions",    "queuebroadcasttx",          queuebroadcasttx,          {"hexstring","height_or_mtp"} },
     { "rawtransactions",    "gettxbroadcastqueue",       gettxbroadcastqueue,       {} },
     { "rawtransactions",    "cancelbroadcasttx",         cancelbroadcasttx,         {"txid"} },
     { "rawtransactions",    "combinerawtransaction",     combinerawtransaction,     {"txs"} },
